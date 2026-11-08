@@ -86,6 +86,7 @@ async function runSmoke(win) {
   }))()`)
   result.userData = app.getPath('userData')
   writeFileSync(smoke, (await win.webContents.capturePage()).toPNG())
+  writeFileSync(smoke + '.json', JSON.stringify(result)) // Windows GUI builds have no reliable stdout
   console.log('SMOKE ' + JSON.stringify(result))
   app.quit()
 }
