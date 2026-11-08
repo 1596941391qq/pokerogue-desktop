@@ -12,7 +12,8 @@ const smoke = process.env.PRS_SMOKE // dev check: render, test saves, write a sc
 // that folder: never rename it, or players who upgrade will not see their saves.
 const DATA_DIR_NAME = 'pokemon-rogue-battle'
 app.setName(DATA_DIR_NAME)
-app.setPath('userData', path.join(app.getPath('appData'), DATA_DIR_NAME))
+// PRS_DATA_DIR only applies to smoke tests, so a test can run against a copy of real saves.
+app.setPath('userData', (smoke && process.env.PRS_DATA_DIR) || path.join(app.getPath('appData'), DATA_DIR_NAME))
 
 const packAssets = app.isPackaged ? path.join(process.resourcesPath, 'pack-assets') : path.join(__dirname, 'pack-assets')
 const icon = nativeImage.createFromPath(path.join(packAssets, isMac ? 'icon.png' : 'icon.ico'))
