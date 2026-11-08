@@ -59,6 +59,7 @@ function showImage(file, title) {
 // sessionData1_Guest…. Once per install, if this build has no saves yet, copy the 2024 ones over under
 // the new names. Nothing is deleted; keys this build already has are never overwritten.
 const LEGACY_ORIGIN = 'http://localhost:8000'
+let saveCheck = 'not run' // reported by the smoke test
 const SAVE_KEY = /^(data|sessionData|runHistoryData)/
 
 function legacyEntries(legacy) {
@@ -80,13 +81,15 @@ function writeMissing(entries) { // runs in the page
 
 async function migrateLegacySaves() {
   const flag = path.join(app.getPath('userData'), 'legacy-saves-checked')
-  if (existsSync(flag)) return
+  if (existsSync(flag)) { saveCheck = 'already checked'; return }
   const blank = path.join(packAssets, 'blank.html')
   const probe = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } })
   try {
     await probe.loadFile(blank)
     const current = await probe.webContents.executeJavaScript('Object.keys(localStorage)')
+    saveCheck = 'this build already has saves'
     if (!current.some(k => SAVE_KEY.test(k))) {
+      saveCheck = 'no 2024 saves'
       // Open the old origin without a server: answer every http request with an empty page meanwhile.
       protocol.handle('http', () => new Response('<!doctype html><title>.</title>', { headers: { 'content-type': 'text/html' } }))
       let legacy = {}
@@ -99,12 +102,15 @@ async function migrateLegacySaves() {
       if (Object.keys(legacy).some(k => SAVE_KEY.test(k))) {
         await probe.loadFile(blank)
         const n = await probe.webContents.executeJavaScript(`(${writeMissing})(${JSON.stringify(legacyEntries(legacy))})`)
-        console.log(`copied ${n} entries from the 2024 save (${LEGACY_ORIGIN})`)
+        saveCheck = `copied ${n} entries from the 2024 save`
+        console.log(`${saveCheck} (${LEGACY_ORIGIN})`)
       }
     }
     writeFileSync(flag, new Date().toISOString())
   } catch (e) {
+    saveCheck = 'failed: ' + (e?.message || e)
     console.error('2024 save check failed; will retry next start', e)
+    try { writeFileSync(path.join(app.getPath('userData'), 'save-check-error.log'), `${new Date().toISOString()} ${e?.stack || e}\n`) } catch {}
   } finally {
     probe.destroy()
   }
@@ -141,6 +147,7 @@ async function runSmoke(win) {
     saveKeys: Object.keys(localStorage).filter(k => /^(data|sessionData)/.test(k)).sort(),
   }))()`)
   result.userData = app.getPath('userData')
+  result.saveCheck = saveCheck
   writeFileSync(smoke, (await win.webContents.capturePage()).toPNG())
   writeFileSync(smoke + '.json', JSON.stringify(result)) // Windows GUI builds have no reliable stdout
   console.log('SMOKE ' + JSON.stringify(result))

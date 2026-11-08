@@ -25,7 +25,7 @@
     "directories": { "output": "release" },
     "files": ["main.mjs", "game-version.json", "package.json", "dist/**/*", "!dist/**/*.map"],
     "extraResources": [
-      { "from": "pack-assets", "to": "pack-assets", "filter": ["*.png", "*.ico", "viewer.html"] }
+      { "from": "pack-assets", "to": "pack-assets", "filter": ["*.png", "*.ico", "*.html"] }
     ],
     "win": {
       "icon": "pack-assets/icon.ico",
