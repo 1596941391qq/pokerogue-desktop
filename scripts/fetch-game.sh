@@ -6,8 +6,9 @@
 #   MOBILE_REPO=~/games/pokerogue-android scripts/fetch-game.sh   # copy from a local checkout instead
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC_REPO="$(node -p "require('$ROOT/game-version.json').sourceRepo")"
-REF="$(node -p "require('$ROOT/game-version.json').sourceRef")"
+cd "$ROOT"   # relative require() below works on Windows Git Bash too (its /d/... paths are not Node paths)
+SRC_REPO="$(node -p "require('./game-version.json').sourceRepo")"
+REF="$(node -p "require('./game-version.json').sourceRef")"
 WEB=app/src/main/assets/web
 
 if [ -n "${MOBILE_REPO:-}" ]; then
