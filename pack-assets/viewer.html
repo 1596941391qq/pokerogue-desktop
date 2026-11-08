@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>图鉴</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #222; overflow: hidden; font-family: sans-serif; }
+  #stage { position: absolute; inset: 0; cursor: grab; }
+  #stage.drag { cursor: grabbing; }
+  img { position: absolute; left: 0; top: 0; transform-origin: 0 0; user-select: none; -webkit-user-drag: none; image-rendering: auto; }
+  #bar { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.7); border-radius: 18px; padding: 6px 12px; display: flex; gap: 8px; }
+  #bar button { background: none; border: 0; color: #fff; font-size: 13px; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+  #bar button:hover { background: rgba(255,255,255,.2); }
+</style>
+</head>
+<body>
+<div id="stage"><img id="img" alt=""></div>
+<div id="bar"><button id="in">放大</button><button id="out">缩小</button><button id="fit">适应窗口</button></div>
+<script>
+  // Scroll wheel zooms around the cursor, drag pans, double-click fits the window.
+  const img = document.getElementById('img'), stage = document.getElementById('stage');
+  let s = 1, x = 0, y = 0, drag = null;
+  const apply = () => { img.style.transform = `translate(${x}px, ${y}px) scale(${s})`; };
+  const fit = () => {
+    s = Math.min(innerWidth / img.naturalWidth, innerHeight / img.naturalHeight);
+    x = (innerWidth - img.naturalWidth * s) / 2; y = (innerHeight - img.naturalHeight * s) / 2; apply();
+  };
+  const zoom = (k, cx = innerWidth / 2, cy = innerHeight / 2) => {
+    const ns = Math.max(0.05, Math.min(s * k, 10)); x = cx - (cx - x) * ns / s; y = cy - (cy - y) * ns / s; s = ns; apply();
+  };
+  img.onload = fit;
+  img.src = new URLSearchParams(location.search).get('img') || '';
+  stage.addEventListener('wheel', e => { e.preventDefault(); zoom(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX, e.clientY); }, { passive: false });
+  stage.addEventListener('mousedown', e => { drag = [e.clientX - x, e.clientY - y]; stage.classList.add('drag'); });
+  addEventListener('mousemove', e => { if (drag) { x = e.clientX - drag[0]; y = e.clientY - drag[1]; apply(); } });
+  addEventListener('mouseup', () => { drag = null; stage.classList.remove('drag'); });
+  stage.addEventListener('dblclick', fit);
+  addEventListener('resize', fit);
+  document.getElementById('in').onclick = () => zoom(1.25);
+  document.getElementById('out').onclick = () => zoom(0.8);
+  document.getElementById('fit').onclick = fit;
+</script>
+</body>
+</html>

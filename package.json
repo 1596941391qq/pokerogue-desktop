@@ -1,0 +1,48 @@
+{
+  "name": "pokemon-rogue-battle",
+  "private": true,
+  "version": "1.12.2",
+  "description": "PokéRogue 宝可梦肉鸽 电脑离线版（Windows / Mac）",
+  "author": "黑咖啡和冰月亮",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "fetch-game": "bash scripts/fetch-game.sh",
+    "start": "electron .",
+    "dist:win": "electron-builder --win portable zip --x64 --publish never",
+    "dist:mac": "electron-builder --mac dmg --arm64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "com.mengnieyu.pokerogue.desktop",
+    "productName": "PokeRogue",
+    "buildVersion": "1.12.2.6",
+    "copyright": "PokéRogue © Pagefault Games (AGPL-3.0) · 打包：黑咖啡和冰月亮",
+    "directories": { "output": "release" },
+    "files": ["main.mjs", "game-version.json", "package.json", "dist/**/*", "!dist/**/*.map"],
+    "extraResources": [
+      { "from": "pack-assets", "to": "pack-assets", "filter": ["*.png", "*.ico", "viewer.html"] }
+    ],
+    "win": {
+      "icon": "pack-assets/icon.ico",
+      "executableName": "启动游戏",
+      "artifactName": "prs${env.PRS_TAG}-pc.${ext}"
+    },
+    "portable": {
+      "artifactName": "prs${env.PRS_TAG}-portable.${ext}"
+    },
+    "mac": {
+      "icon": "pack-assets/icon.png",
+      "category": "public.app-category.games",
+      "identity": "-",
+      "artifactName": "prs${env.PRS_TAG}-mac-${arch}.${ext}"
+    },
+    "dmg": {
+      "title": "PokeRogue"
+    }
+  }
+}

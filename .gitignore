@@ -1,0 +1,7 @@
+node_modules/
+dist/
+release/
+.game-src/
+.DS_Store
+*.log
+smoke*.png
