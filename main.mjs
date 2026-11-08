@@ -3,6 +3,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 
+// Electron is pinned to 44 (Chromium 152) on purpose: Electron 45 (Chromium 156) draws the lines of
+// PokéRogue's multi-line menus on top of each other (title menu unreadable). Re-check before upgrading.
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const isMac = process.platform === 'darwin'
 const smoke = process.env.PRS_SMOKE // dev check: render, test saves, write a screenshot, quit
@@ -140,11 +142,12 @@ function createWindow() {
 
 async function runSmoke(win) {
   await new Promise(r => win.webContents.once('did-finish-load', r))
-  await new Promise(r => setTimeout(r, 25000))
+  await new Promise(r => setTimeout(r, Number(process.env.PRS_SMOKE_WAIT) || 25000))
   // Read-only: report which save slots exist (names only, never contents).
   const result = await win.webContents.executeJavaScript(`(() => ({
     origin: location.origin || location.protocol, canvas: !!document.querySelector('canvas'),
     saveKeys: Object.keys(localStorage).filter(k => /^(data|sessionData)/.test(k)).sort(),
+    otherKeys: Object.keys(localStorage).filter(k => !/^(data|sessionData)/.test(k)).sort(),
   }))()`)
   result.userData = app.getPath('userData')
   result.saveCheck = saveCheck
