@@ -1,7 +1,7 @@
-import { app, BrowserWindow, dialog, Menu, nativeImage, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, nativeImage, protocol, shell } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const isMac = process.platform === 'darwin'
@@ -54,6 +54,62 @@ function showImage(file, title) {
   win.loadFile(path.join(packAssets, 'viewer.html'), { query: { img: file } })
 }
 
+// Desktop builds from 2024 served the game at http://localhost:8000 and saved under unsuffixed keys
+// (data, sessionData, sessionData1…). The current game, offline, reads data_Guest, sessionData_Guest,
+// sessionData1_Guest…. Once per install, if this build has no saves yet, copy the 2024 ones over under
+// the new names. Nothing is deleted; keys this build already has are never overwritten.
+const LEGACY_ORIGIN = 'http://localhost:8000'
+const SAVE_KEY = /^(data|sessionData|runHistoryData)/
+
+function legacyEntries(legacy) {
+  const out = []
+  for (const [k, v] of Object.entries(legacy)) {
+    if (k === 'data_bak') continue
+    const slot = /^sessionData(\d*)$/.exec(k)
+    out.push([k === 'data' ? 'data_Guest' : slot ? `sessionData${slot[1]}_Guest` : k, v])
+  }
+  if (!('data' in legacy) && 'data_bak' in legacy) out.push(['data_Guest', legacy.data_bak])
+  return out
+}
+
+function writeMissing(entries) { // runs in the page
+  let n = 0
+  for (const [k, v] of entries) if (localStorage.getItem(k) === null) { localStorage.setItem(k, v); n++ }
+  return n
+}
+
+async function migrateLegacySaves() {
+  const flag = path.join(app.getPath('userData'), 'legacy-saves-checked')
+  if (existsSync(flag)) return
+  const blank = path.join(packAssets, 'blank.html')
+  const probe = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } })
+  try {
+    await probe.loadFile(blank)
+    const current = await probe.webContents.executeJavaScript('Object.keys(localStorage)')
+    if (!current.some(k => SAVE_KEY.test(k))) {
+      // Open the old origin without a server: answer every http request with an empty page meanwhile.
+      protocol.handle('http', () => new Response('<!doctype html><title>.</title>', { headers: { 'content-type': 'text/html' } }))
+      let legacy = {}
+      try {
+        await probe.loadURL(LEGACY_ORIGIN + '/')
+        legacy = await probe.webContents.executeJavaScript('Object.fromEntries(Object.keys(localStorage).map(k => [k, localStorage.getItem(k)]))')
+      } finally {
+        protocol.unhandle('http')
+      }
+      if (Object.keys(legacy).some(k => SAVE_KEY.test(k))) {
+        await probe.loadFile(blank)
+        const n = await probe.webContents.executeJavaScript(`(${writeMissing})(${JSON.stringify(legacyEntries(legacy))})`)
+        console.log(`copied ${n} entries from the 2024 save (${LEGACY_ORIGIN})`)
+      }
+    }
+    writeFileSync(flag, new Date().toISOString())
+  } catch (e) {
+    console.error('2024 save check failed; will retry next start', e)
+  } finally {
+    probe.destroy()
+  }
+}
+
 function createWindow() {
   if (!smoke) dialog.showMessageBoxSync({ type: 'info', icon, title: '关于本游戏', message: ABOUT, buttons: ['确定'] })
 
@@ -91,10 +147,13 @@ async function runSmoke(win) {
   app.quit()
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+  await migrateLegacySaves()
   createWindow()
+  starting = false
 })
 
-app.on('window-all-closed', () => { if (!isMac) app.quit() })
+let starting = true // the hidden save-check window closes before the game window opens
+app.on('window-all-closed', () => { if (!isMac && !starting) app.quit() })
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
