@@ -23,7 +23,8 @@ else
 fi
 
 [ -f "$SRC/index.html" ] || { echo "no game build at $SRC" >&2; exit 1; }
-mkdir -p "$ROOT/dist"
-rsync -a --delete --exclude .gitkeep "$SRC/" "$ROOT/dist/"
+rm -rf "$ROOT/dist" && mkdir -p "$ROOT/dist"
+cp -R "$SRC/." "$ROOT/dist/"   # plain cp: the Windows runner has no rsync
+rm -f "$ROOT/dist/.gitkeep"
 rm -rf "$ROOT/.game-src"
 echo "dist/ <- $SRC_REPO@$REF ($(du -sh "$ROOT/dist" | cut -f1))"
