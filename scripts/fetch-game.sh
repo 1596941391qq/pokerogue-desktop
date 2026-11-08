@@ -17,7 +17,7 @@ else
   TMP="$ROOT/.game-src"
   rm -rf "$TMP"
   git clone --quiet --filter=blob:none --no-checkout "https://github.com/$SRC_REPO.git" "$TMP"
-  git -C "$TMP" sparse-checkout set --no-cone "/$WEB/"
+  git -C "$TMP" sparse-checkout set --cone "$WEB"   # cone mode: no leading "/" for Git Bash to rewrite into C:/Program Files/Git/...
   git -C "$TMP" checkout --quiet "$REF"
   SRC="$TMP/$WEB"
 fi
