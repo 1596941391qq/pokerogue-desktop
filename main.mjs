@@ -1,7 +1,8 @@
-import { app, BrowserWindow, dialog, Menu, nativeImage, protocol, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, Menu, nativeImage, protocol, shell } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { randomInt } from 'node:crypto'
 
 // Electron is pinned to 44 (Chromium 152) on purpose: Electron 45 (Chromium 156) draws the lines of
 // PokéRogue's multi-line menus on top of each other (title menu unreadable). Re-check before upgrading.
@@ -14,8 +15,13 @@ const smoke = process.env.PRS_SMOKE // dev check: render, test saves, write a sc
 // that folder: never rename it, or players who upgrade will not see their saves.
 const DATA_DIR_NAME = 'pokemon-rogue-battle'
 app.setName(DATA_DIR_NAME)
-// PRS_DATA_DIR only applies to smoke tests, so a test can run against a copy of real saves.
-app.setPath('userData', (smoke && process.env.PRS_DATA_DIR) || path.join(app.getPath('appData'), DATA_DIR_NAME))
+// PRS_DATA_DIR only applies to smoke tests and to dev runs (npx electron .), so a test can run against a
+// copy of real saves or an empty profile. Dev runs also accept --remote-debugging-port (Electron's own
+// switch) and the two test switches below; the packaged game ignores them.
+const dev = !app.isPackaged
+app.setPath('userData', ((smoke || dev) && process.env.PRS_DATA_DIR) || path.join(app.getPath('appData'), DATA_DIR_NAME))
+const coopAuto = dev && process.env.PRS_COOP_AUTO // dev: open this co-op room right after the game loads
+const skipAbout = smoke || coopAuto || (dev && process.env.PRS_SKIP_ABOUT)
 
 const packAssets = app.isPackaged ? path.join(process.resourcesPath, 'pack-assets') : path.join(__dirname, 'pack-assets')
 const icon = nativeImage.createFromPath(path.join(packAssets, isMac ? 'icon.png' : 'icon.ico'))
@@ -45,10 +51,91 @@ const helpItems = [
   { label: '性格表', click: () => showImage('nature.png', '性格表') },
 ]
 
+// Co-op mode (2 players): this app is 1P and hosts the game; 2P joins from a phone browser, sees the game
+// as a video stream and sends button presses. The scripts in coop/ (copied by scripts/sync-coop.sh) are
+// injected into the game page when a room is opened; dist/ carries three small hooks for them
+// (scripts/patch-coop.mjs) that do nothing while no room is open.
+const COOP_ORIGIN = 'https://192.220.36.155:8790' // signaling server + phone page; its certificate is a normal trusted one
+const COOP_SCRIPTS = ['coop.js', 'host.js', 'host-team.js', 'host-game.js', 'host-overlay.js'] // order matters
+const COOP_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // no 0/O/1/I: the code is read aloud and typed on a phone
+let gameWin = null
+let gamePageReady = false // the game page finished loading, scripts can be injected
+let coop = null // { room, link, win (info window, may be closed), status: [text, kind] } while a room is open
+
+const coopItems = [
+  { label: '开房间（我当 1P）', click: () => openCoopRoom() },
+  { label: '关闭房间', click: () => closeCoopRoom() },
+]
+
 // Windows keeps the old one-click top-level items; macOS needs submenus plus the standard app/edit menus.
 const template = isMac
-  ? [{ role: 'appMenu' }, { role: 'editMenu' }, { label: '帮助', submenu: helpItems }, { role: 'windowMenu' }]
-  : helpItems
+  ? [{ role: 'appMenu' }, { role: 'editMenu' }, { label: '合作模式', submenu: coopItems }, { label: '帮助', submenu: helpItems }, { role: 'windowMenu' }]
+  : [...helpItems, { label: '合作模式', submenu: coopItems }]
+
+async function injectCoop() {
+  const wc = gameWin.webContents
+  await wc.executeJavaScript(`window.PRS_COOP_ROOM=${JSON.stringify(coop.room)};0`)
+  for (const f of COOP_SCRIPTS) await wc.executeJavaScript(readFileSync(path.join(__dirname, 'coop', f), 'utf8') + '\n;0')
+}
+
+function setCoopStatus(text, kind = '') {
+  if (!coop) return
+  coop.status = [text, kind]
+  if (coop.win && !coop.win.isDestroyed()) coop.win.webContents.executeJavaScript(`window.setStatus&&setStatus(${JSON.stringify(text)},${JSON.stringify(kind)});0`).catch(() => {})
+}
+
+// The co-op scripts report through console lines that start with "COOP" (see coop/host.js).
+function onCoopLog(msg) {
+  if (!coop) return
+  if (/^COOP room open/.test(msg)) setCoopStatus(/here: true/.test(msg) ? '队友已进房间，正在连接…' : '等队友加入')
+  else if (/^COOP guest joined/.test(msg)) setCoopStatus('队友已进房间，正在连接…')
+  else if (/^COOP state connected/.test(msg)) setCoopStatus('队友已连接', 'ok')
+  else if (/^COOP (guest left|state (disconnected|failed|closed))/.test(msg)) setCoopStatus('队友掉线，等队友重新加入', 'bad')
+  else if (/^COOP FAIL/.test(msg)) setCoopStatus('开房间失败，请检查网络后关闭房间重开', 'bad')
+}
+
+function showCoopWindow() {
+  if (coop.win && !coop.win.isDestroyed()) { coop.win.show(); return }
+  const win = coop.win = new BrowserWindow({
+    parent: gameWin, width: 440, height: 272, useContentSize: true, resizable: false, minimizable: false, maximizable: false,
+    fullscreenable: false, alwaysOnTop: true, icon, title: `合作房间 ${coop.room}`, autoHideMenuBar: true, backgroundColor: '#2b2633',
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+  })
+  win.setMenu(null)
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  win.webContents.on('console-message', e => {
+    if (e.message === 'COOPROOM copy' && coop) clipboard.writeText(coop.link)
+  })
+  win.webContents.once('did-finish-load', () => { if (coop) setCoopStatus(...coop.status) })
+  win.loadFile(path.join(packAssets, 'coop-room.html'), { query: { room: coop.room, link: coop.link } })
+}
+
+async function openCoopRoom(room) {
+  if (!gameWin || gameWin.isDestroyed()) return
+  if (coop) { showCoopWindow(); return } // one room at a time: show its info again
+  room = (room || Array.from({ length: 6 }, () => COOP_CODE_CHARS[randomInt(COOP_CODE_CHARS.length)]).join('')).toUpperCase()
+  coop = { room, link: `${COOP_ORIGIN}/coop/guest2.html?room=${room}&auto=1`, win: null, status: ['正在开房间…', ''] }
+  showCoopWindow()
+  try {
+    if (gamePageReady) await injectCoop() // otherwise did-finish-load injects
+  } catch (e) {
+    setCoopStatus('开房间失败：' + (e?.message || e), 'bad')
+  }
+}
+
+function closeCoopRoom() {
+  if (!coop) { dialog.showMessageBox(gameWin, { type: 'info', icon, title: '合作模式', message: '现在没有开着的房间。' }); return }
+  const choice = dialog.showMessageBoxSync(gameWin, {
+    type: 'warning', icon, title: '关闭房间', buttons: ['关闭房间', '取消'], defaultId: 1, cancelId: 1,
+    message: `关闭房间 ${coop.room}？`,
+    detail: '游戏会回到标题画面，队友会断开。当前这场战斗里还没存档的进度会丢失（每打完一波游戏会自动存档）。',
+  })
+  if (choice !== 0) return
+  const info = coop.win
+  coop = null
+  if (info && !info.isDestroyed()) info.destroy()
+  gameWin.webContents.reload() // a fresh page has none of the injected co-op scripts
+}
 
 function showImage(file, title) {
   const win = new BrowserWindow({ title, width: 900, height: 640, icon, autoHideMenuBar: true })
@@ -119,12 +206,32 @@ async function migrateLegacySaves() {
 }
 
 function createWindow() {
-  if (!smoke) dialog.showMessageBoxSync({ type: 'info', icon, title: '关于本游戏', message: ABOUT, buttons: ['确定'] })
+  if (!skipAbout) dialog.showMessageBoxSync({ type: 'info', icon, title: '关于本游戏', message: ABOUT, buttons: ['确定'] })
 
   const win = new BrowserWindow({
     show: false, icon, title: 'PokéRogue', backgroundColor: '#484050',
     fullscreenable: true, maximizable: true,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+    // backgroundThrottling off: in a co-op room the game must keep running (and streaming to 2P) while this
+    // window is behind another one; it can only be chosen here, when the window is created.
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false },
+  })
+  gameWin = win
+  win.on('closed', () => {
+    if (coop?.win && !coop.win.isDestroyed()) coop.win.destroy()
+    coop = null
+    gameWin = null
+    gamePageReady = false
+  })
+  win.webContents.on('console-message', e => {
+    const msg = String(e.message)
+    if (msg.startsWith('COOP')) { onCoopLog(msg); if (dev) console.log(msg) }
+  })
+  // The page was loaded again (first load with a room pending, or the game reloading itself): the room stays open.
+  win.webContents.on('did-start-navigation', e => { if (e.isMainFrame && !e.isSameDocument) gamePageReady = false })
+  win.webContents.on('did-finish-load', () => {
+    gamePageReady = true
+    if (coop) injectCoop().catch(e => setCoopStatus('开房间失败：' + (e?.message || e), 'bad'))
+    else if (coopAuto && !win.coopAutoDone) { win.coopAutoDone = true; openCoopRoom(coopAuto) }
   })
   // Links inside the game (wiki, Discord…) open in the normal browser.
   win.webContents.setWindowOpenHandler(({ url }) => {

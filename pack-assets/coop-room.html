@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>合作房间</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 14px 16px; font: 14px/1.5 -apple-system, "Microsoft YaHei", "PingFang SC", sans-serif; background: #2b2633; color: #f1eef5; user-select: none; }
+  .row { display: flex; gap: 14px; align-items: center; }
+  #qr { width: 148px; height: 148px; background: #fff; border-radius: 6px; flex: none; image-rendering: pixelated; }
+  .lbl { font-size: 12px; color: #b3abc0; }
+  #code { font: 700 38px/1.1 ui-monospace, Menlo, Consolas, monospace; letter-spacing: 4px; user-select: text; }
+  #status { display: inline-block; margin-top: 8px; padding: 3px 10px; border-radius: 12px; font-size: 13px; background: #5a5266; }
+  #status.ok { background: #2e7d4f; }
+  #status.bad { background: #a23b3b; }
+  .link { display: flex; gap: 6px; margin-top: 12px; }
+  #link { flex: 1; min-width: 0; padding: 5px 7px; border: 1px solid #5a5266; border-radius: 5px; background: #1f1b26; color: #d9d3e3; font: 12px ui-monospace, Menlo, Consolas, monospace; }
+  button { padding: 5px 14px; border: 0; border-radius: 5px; background: #6d5bd0; color: #fff; font-size: 13px; cursor: pointer; }
+  button:active { background: #5747b3; }
+  p { margin: 10px 0 0; font-size: 12px; color: #b3abc0; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <canvas id="qr"></canvas>
+    <div>
+      <div class="lbl">房间号</div>
+      <div id="code"></div>
+      <div id="status">正在开房间…</div>
+      <div class="lbl" style="margin-top:8px">队友用手机扫码，或打开下面的链接</div>
+    </div>
+  </div>
+  <div class="link"><input id="link" readonly><button id="copy">复制</button></div>
+  <p>合作规则（双打、各自 10 点、5 选 2）只对开房间之后新开的一局生效，请在标题画面开房间，再开始新游戏。关掉这个小窗不会关房间。</p>
+<script src="qrcode.js"></script>
+<script>
+  // Opened by main.mjs with ?room=CODE&link=<join link>; main.mjs calls setStatus() as the game page logs COOP lines.
+  const q = new URLSearchParams(location.search), link = q.get('link') || ''
+  document.getElementById('code').textContent = q.get('room') || ''
+  const input = document.getElementById('link')
+  input.value = link
+  input.onclick = () => input.select()
+  window.setStatus = (text, kind) => { const s = document.getElementById('status'); s.textContent = text; s.className = kind || '' }
+  // main.mjs listens for this console line and writes the link to the system clipboard.
+  const copy = document.getElementById('copy')
+  copy.onclick = () => { console.log('COOPROOM copy'); copy.textContent = '已复制'; setTimeout(() => { copy.textContent = '复制' }, 1500) }
+  try {
+    const m = QRCodeCore.create(link, { errorCorrectionLevel: 'M' }).modules, quiet = 3, n = m.size + quiet * 2
+    const c = document.getElementById('qr'), scale = Math.max(1, Math.floor(444 / n))
+    c.width = c.height = n * scale
+    const g = c.getContext('2d')
+    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height)
+    g.fillStyle = '#000'
+    for (let y = 0; y < m.size; y++) for (let x = 0; x < m.size; x++) if (m.data[y * m.size + x]) g.fillRect((x + quiet) * scale, (y + quiet) * scale, scale, scale)
+  } catch (e) { console.log('COOPROOM qr failed ' + e) }
+</script>
+</body>
+</html>

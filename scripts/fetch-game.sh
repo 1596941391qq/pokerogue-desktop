@@ -28,3 +28,4 @@ cp -R "$SRC/." "$ROOT/dist/"   # plain cp: the Windows runner has no rsync
 rm -f "$ROOT/dist/.gitkeep"
 rm -rf "$ROOT/.game-src"
 echo "dist/ <- $SRC_REPO@$REF ($(du -sh "$ROOT/dist" | cut -f1))"
+node "$ROOT/scripts/patch-coop.mjs" "$ROOT/dist"   # co-op mode hooks; no effect in solo play
