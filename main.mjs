@@ -102,6 +102,7 @@ function showCoopWindow() {
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   })
   win.setMenu(null)
+  win.on('page-title-updated', e => e.preventDefault()) // keep the room code in the title bar
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('console-message', e => {
     if (e.message === 'COOPROOM copy' && coop) clipboard.writeText(coop.link)
