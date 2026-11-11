@@ -8,6 +8,9 @@
 //   2P's Pokémon, the host enters that pick through the game's own menus.
 // - Intents: what each player is choosing right now (for host-overlay.js's bubbles and for the phone).
 // - Party: both players' Pokémon and the bag, for the phone's team sheet.
+// - 2P away (never joined, or dropped): nothing waits for 2P; 1P's keyboard plays every Pokémon and
+//   answers every prompt until the guest is back.
+// - Shouts: four preset lines, 2P from the phone ({say: n}), 1P with F1–F4.
 window.CoopGame = (function () {
   const log = (...a) => console.log('COOP', ...a.map(x => typeof x === 'string' ? x : JSON.stringify(x)));
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -16,6 +19,7 @@ window.CoopGame = (function () {
   const nameOf = p => (p.getNameToRender ? p.getNameToRender() : p.name);
   const CHOOSING = ['CommandPhase', 'SelectTargetPhase'];
   const STAGE = ['CommandPhase', 'SelectTargetPhase', 'EnemyCommandPhase'];
+  const SHARED_PHASES = ['MysteryEncounterPhase', 'SelectBiomePhase'], SHARED_MODES = ['OPTION_SELECT', 'MYSTERY_ENCOUNTER'];
   const KIND = { 1: '扔精灵球', 2: '换宝可梦', 3: '逃走' };
   const T = window.CoopTeam;
   // other questions go to one player too: who answers, and the Pokémon it is about
@@ -35,7 +39,7 @@ window.CoopGame = (function () {
   const STATUS = ['', '中毒', '剧毒', '麻痹', '睡眠', '冰冻', '灼伤', '濒死'];
 
   const st = {
-    stage: false, owner: null, turnKey: '', pick: null, pickSlot: -1, choice: null, intent2: null, applying: false,
+    stage: false, owner: null, shared: null, turnKey: '', pick: null, pickSlot: -1, choice: null, intent2: null, applying: false,
     p1: null, p2: null, mons: [], reward: null, starters: null, streak: 0, sent: {},
   };
   const listeners = [];
@@ -47,7 +51,32 @@ window.CoopGame = (function () {
     st.sent[kind] = j;
     L.send(msg);
   }
-  L.onOpen(() => Object.values(st.sent).forEach(j => L.send(JSON.parse(j))));
+  // is 2P here? While not, no key is gated and no pick is waited for (1P plays for 2P)
+  const online = () => !L.online || L.online();
+  function resync() {
+    // rebuild this turn's pick panel from the game (2P may have dropped mid-turn), then resend the rest
+    st.turnKey = ''; st.choice = null; st.intent2 = null; delete st.sent.pick;
+    Object.values(st.sent).forEach(j => L.send(JSON.parse(j)));
+  }
+  L.onOpen(() => { resync(); emit('link', { online: true }); });
+  L.onClose && L.onClose(() => {
+    st.choice = null; st.intent2 = null; // a pick 2P left behind is dropped, 1P chooses instead
+    log('2P away: 1P plays for 2P');
+    emit('link', { online: false });
+  });
+
+  // ---- shouts: one of four preset lines, shown as a speech bubble (host-overlay.js) and on the phone ----
+  const SAY = ['集火这只', '等我一下', '换你来', '好的'];
+  const saidAt = { p1: 0, p2: 0 };
+  function shout(who, n) {
+    n = Number(n);
+    if (!(n >= 0 && n < SAY.length) || Date.now() - saidAt[who] < 1500) return false; // one per 1.5 s each
+    saidAt[who] = Date.now();
+    const ev = { who, n, text: SAY[n] };
+    emit('say', ev);
+    L.send({ said: ev });
+    return true;
+  }
 
   // ---- what a player is doing: {state: 'thinking'|'choosing'|'done', move, target (BattlerIndex), kind} ----
   // player commands keep their targets on the command itself; enemy commands on .move
@@ -102,7 +131,9 @@ window.CoopGame = (function () {
       // 1P's last key may still be held when the game reaches 2P's Pokémon, and a second keydown of a held
       // key does nothing, so give it a moment and retry
       await sleep(250);
-      let opened = false;
+      // the menu may already be open (2P, or 1P playing for a dropped 2P, went in by hand): start from there
+      if (uiMode() === 'TARGET_SELECT') { await tap('b'); await waitMode(m => m === 'FIGHT', 800); }
+      let opened = uiMode() === 'FIGHT';
       for (let i = 0; i < 4 && !opened; i++) {
         if (uiMode() !== 'COMMAND') break;
         s.ui.getHandler().setCursor(0); // 战斗
@@ -132,11 +163,19 @@ window.CoopGame = (function () {
   L.on(m => {
     if ('choice' in m) { st.choice = m.choice; log('2P pick', m.choice); }
     if ('intent' in m) st.intent2 = m.intent;
+    if ('say' in m) shout('p2', m.say);
+    if (m.sync && !st.applying) resync(); // the phone cleared its panels after a hiccup only it saw
   });
   // presses: the guest is ignored while 1P's Pokémon chooses (and while the host enters 2P's pick) ...
   L.setGate(() => !(st.owner === 'p1' || st.applying));
   // ... and 1P's own keyboard is ignored while 2P's Pokémon chooses (the guest's synthetic keys are untrusted)
-  window.addEventListener('keydown', e => { if (e.isTrusted && st.owner === 'p2') { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+  // Only while 2P is connected: with 2P away 1P's keyboard does everything.
+  window.addEventListener('keydown', e => {
+    if (!e.isTrusted) return;
+    const f = ['F1', 'F2', 'F3', 'F4'].indexOf(e.key);
+    if (f >= 0) { e.stopImmediatePropagation(); e.preventDefault(); if (!e.repeat) shout('p1', f); return; } // 1P's shouts
+    if (st.owner === 'p2' && online()) { e.stopImmediatePropagation(); e.preventDefault(); }
+  }, true);
 
   const enemyName = (s, bi) => { const e = s.getEnemyField().find(x => x && x.getBattlerIndex() === bi); return e ? nameOf(e) : ''; };
   const say = (s, i) => !i ? '' : i.state === 'thinking' ? '思考中…' : i.kind ? i.kind
@@ -166,6 +205,15 @@ window.CoopGame = (function () {
       const q = ph && PROMPT[ph.phaseName];
       let who = null, n = '';
       try { if (q) { who = q.who(ph, s); const mon = q.mon(ph, s); n = mon ? nameOf(mon) : ''; } } catch {}
+      // host-team.js may name one player for team-wide choices (older versions do not have sharedPicker)
+      let shared = null;
+      try {
+        if (typeof T.sharedPicker === 'function' && ph && (SHARED_PHASES.includes(ph.phaseName) || SHARED_MODES.includes(uiMode()))) {
+          const w = T.sharedPicker(ph);
+          if (w === 'p1' || w === 'p2') shared = w;
+        }
+      } catch {}
+      st.shared = shared;
       if (st.starters && st.starters.picker) { // picking starters: take turns, each with their own points
         const t = st.starters, w = t.picker;
         st.owner = w;
@@ -175,7 +223,9 @@ window.CoopGame = (function () {
       } else if (st.reward) {
         const r = st.reward, first = r.round === 1;
         st.owner = r.picker;
-        sendState('turn', r.picker === 'p2'
+        if (r.single) { // a special reward screen: one pick only, no 5 选 2
+          sendState('turn', r.picker === 'p2' ? { turn: 'p2', text: '轮到你挑奖励', sub: '' } : { turn: 'p1', text: '1P 在挑奖励', sub: '' });
+        } else sendState('turn', r.picker === 'p2'
           ? { turn: 'p2', text: '轮到你挑奖励（5 选 2）', sub: first ? '你先挑，剩下的给 1P' : '1P 挑过了，从剩下的里挑' }
           : { turn: 'p1', text: '1P 在挑奖励（5 选 2）', sub: first ? '1P 挑完轮到你' : '你挑过了' });
       } else if (who) {
@@ -193,6 +243,9 @@ window.CoopGame = (function () {
           })();
         }
         sendState('turn', who === 'p2' ? { turn: 'p2', mon: n, text: '轮到你：' + q.what(n), sub: '' } : { turn: 'p1', text: '1P 在决定：' + q.what(n), sub: '' });
+      } else if (shared) { // a choice for the whole team (mystery encounter, next biome): one player decides
+        st.owner = shared;
+        sendState('turn', shared === 'p2' ? { turn: 'p2', text: '轮到你决定', sub: '' } : { turn: 'p1', text: '1P 在决定', sub: '' });
       } else {
         st.owner = null;
         sendState('turn', { turn: null, text: '两人都能操作', sub: '' });
@@ -222,7 +275,7 @@ window.CoopGame = (function () {
       sendState('turn', { turn: 'p1', text: '1P 在给' + now + '选招', sub: st.pick ? (st.choice ? '你已选好，等 1P' : '你可以先选好按完成') : '' });
     } else if (st.owner === 'p2') {
       sendState('turn', { turn: 'p2', mon: now, text: '轮到你了：' + now + '出招', sub: st.choice && ph.fieldIndex === st.pickSlot ? '正在替你出招' : '' });
-      if (st.choice && st.choice.key === key && ph.fieldIndex === st.pickSlot && !st.applying && uiMode() === 'COMMAND') applyChoice(s, st.choice);
+      if (online() && st.choice && st.choice.key === key && ph.fieldIndex === st.pickSlot && !st.applying && ['COMMAND', 'FIGHT', 'TARGET_SELECT'].includes(uiMode())) applyChoice(s, st.choice);
     } else {
       sendState('turn', { turn: null, text: '对手在想…', sub: '' });
     }
@@ -252,5 +305,5 @@ window.CoopGame = (function () {
   }, 1000);
 
   const phaseName = () => { try { return window.PRS_SCENE.phaseManager.getCurrentPhase().phaseName; } catch { return null; } };
-  return { state: () => st, on: fn => listeners.push(fn), uiMode, phaseName };
+  return { state: () => st, on: fn => listeners.push(fn), uiMode, phaseName, online, everJoined: () => !!(L.everJoined && L.everJoined()), shout, SAY };
 })();

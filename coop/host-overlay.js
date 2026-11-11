@@ -4,13 +4,16 @@
 // - A bubble over each player's Pokémon: "思考中…" -> "水枪 → 刺尾虫" while choosing -> "✓ 水枪 → 刺尾虫".
 // - A marker over each enemy a player aims at; both players on one enemy -> "集火".
 // - When both hit the same enemy in a turn, a "集火!" flash; the count grows over consecutive turns.
+// - A slim status bar (room code, 2P online or away, whose move it is) on every screen.
+// - Shouts (集火这只 / 等我一下 / 换你来 / 好的): a short-lived speech bubble over the speaker's Pokémon.
 // Coordinates: the game draws at 1920×1080 with its content scaled ×6, so this layer is ×6 too and works
 // in the game's 320×180 pixels.
 (function () {
   const COLOR = { p1: 0x4aa3ff, p2: 0xf5c84c, gold: 0xffd84a, ink: 0x1d1824 };
   const CSS = { p1: '#4aa3ff', p2: '#f5c84c', gold: '#ffd84a', white: '#f8f8f8', dim: '#c9c1d6' };
   const SHOW_IN = ['COMMAND', 'FIGHT', 'TARGET_SELECT', 'BALL', 'MESSAGE'];
-  let scene = null, layer = null, fx = null, lastSig = '', lastStates = {};
+  const CSS2 = { ok: '#5fd38a', off: '#ff7a66', mute: '#a59cb3' };
+  let scene = null, layer = null, fx = null, bar = null, lastSig = '', lastStates = {}, barSig = '';
 
   function ready() {
     const s = window.PRS_SCENE;
@@ -19,6 +22,8 @@
       scene = s;
       layer = s.add.container(0, 0).setScale(6).setDepth(1e6).setName('coop-overlay');
       fx = s.add.container(0, 0).setScale(6).setDepth(1e6 + 1).setName('coop-fx');
+      bar = s.add.container(0, 0).setScale(6).setDepth(1e6 + 2).setName('coop-bar');
+      barSig = '';
     }
     return true;
   }
@@ -85,12 +90,88 @@
     return c;
   }
 
+  // ---- status bar: 房间 CODE · ● 2P 在线 · 1P 出招. One line of small text on a dark strip. ----
+  // Where it sits per game screen, in 320×180 pixels: [x, y, anchor] with anchor 'r' (x is the right edge),
+  // 'l' (left edge) or 'c' (centre). Chosen so it stays off the game's own UI on each screen.
+  const BAR_POS = window.CoopBarPos = {
+    default: [160, 0, 'c'],
+    STARTER_SELECT: [2, 172, 'l'], // under the 'whose pick' tag; the filter bar runs along the top
+  };
+  function drawBar() {
+    const g = CoopGame.state(), mode = CoopGame.uiMode() || '';
+    const on = CoopGame.online(), ever = CoopGame.everJoined();
+    const room = String(window.PRS_COOP_ROOM || 'TEST').toUpperCase();
+    const turn = g.owner ? (g.stage ? (g.owner === 'p1' ? '1P' : '2P') + ' 出招' : '轮到 ' + (g.owner === 'p1' ? '1P' : '2P')) : '';
+    const pos = BAR_POS[mode] || BAR_POS.default;
+    const sig = [room, on, ever, turn, g.owner, pos.join()].join('|');
+    if (sig === barSig) return;
+    barSig = sig;
+    bar.removeAll(true);
+    if (pos[3] === 'hide') return;
+    const parts = [
+      [text('房间 ', CSS2.mute, 54)], [text(room, CSS.white, 54)],
+      [text(' ● ', on ? CSS2.ok : CSS2.off, 54)],
+      [text(on ? '2P 在线' : (ever ? '2P 掉线' : '2P 未加入') + ' · 1P 代打', on ? CSS.white : CSS2.off, 54)],
+    ];
+    if (turn && (on || g.owner === 'p1')) parts.push([text(' · ', CSS2.mute, 54)], [text(turn, CSS[g.owner], 54)]);
+    const pad = 3, h = Math.ceil(parts[0][0].displayHeight) + 2;
+    const w = Math.ceil(parts.reduce((a, p) => a + p[0].displayWidth, 0)) + pad * 2;
+    const x0 = Math.round(pos[2] === 'r' ? pos[0] - w : pos[2] === 'l' ? pos[0] : pos[0] - w / 2), y0 = pos[1];
+    const bg = new Phaser.GameObjects.Graphics(scene);
+    bg.fillStyle(COLOR.ink, 0.82).fillRoundedRect(x0, y0, w, h, { tl: 0, tr: 0, bl: 2, br: 2 });
+    bar.add(bg);
+    let x = x0 + pad;
+    parts.forEach(([t]) => { t.setPosition(x, y0 + 1); x += t.displayWidth; bar.add(t); });
+  }
+
+  // ---- shouts: a filled bubble in the speaker's colour, gone after about two seconds ----
+  const SAY_OVER = ['COMMAND', 'FIGHT', 'TARGET_SELECT', 'BALL', 'MESSAGE'];
+  const sayNow = {};
+  function sayAt(who) {
+    try {
+      const s = scene, b = s.currentBattle;
+      if (b && SAY_OVER.includes(CoopGame.uiMode())) {
+        const f = s.getPlayerField(), T = window.CoopTeam;
+        const own = (p, i) => (T && T.ownerOf(p)) || (i === 1 ? 'p2' : 'p1');
+        const mon = f.find((p, i) => p && p.isActive(true) && own(p, i) === who && p.getSprite().visible);
+        if (mon) { const at = topOf(mon); if (at.y > 30 && at.y < 170 && at.x > 0 && at.x < 320) return { x: at.x, y: at.y - 15, tail: true }; }
+      }
+    } catch {}
+    return { x: 160, y: who === 'p1' ? 24 : 38, tail: false }; // not in battle: top centre
+  }
+  function sayBubble(ev) {
+    if (!ready()) return;
+    const who = ev.who === 'p1' ? 'p1' : 'p2', at = sayAt(who);
+    if (sayNow[who] && sayNow[who].scene) sayNow[who].destroy();
+    const c = new Phaser.GameObjects.Container(scene, at.x, at.y);
+    const tag = text(who === 'p1' ? '1P' : '2P', '#1d1824', 60);
+    const t = text(ev.text, '#1d1824', 84);
+    tag.setShadow(0, 0, '#000', 0, false, false); t.setShadow(0, 0, '#000', 0, false, false);
+    const pad = 4, gap = 3, h = Math.ceil(t.displayHeight) + 1, w = Math.ceil(tag.displayWidth + gap + t.displayWidth) + pad * 2;
+    const x0 = Math.min(Math.max(Math.round(-w / 2), 2 - at.x), 318 - at.x - w), y0 = -h - 4;
+    const g = new Phaser.GameObjects.Graphics(scene);
+    g.fillStyle(COLOR.ink, 1).fillRoundedRect(x0 - 1, y0 - 1, w + 2, h + 2, 5);
+    g.fillStyle(COLOR[who], 1).fillRoundedRect(x0, y0, w, h, 4);
+    if (at.tail) g.fillStyle(COLOR[who], 1).fillTriangle(-3, -4, 3, -4, 0, 0);
+    tag.setPosition(x0 + pad, y0 + 2);
+    t.setPosition(tag.x + tag.displayWidth + gap, y0);
+    c.add([g, tag, t]);
+    fx.add(c);
+    sayNow[who] = c;
+    pop(c);
+    scene.tweens.add({ targets: c, alpha: 0, delay: 2200, duration: 300, onComplete: () => c.destroy() });
+  }
+
   function draw() {
     if (!ready()) return;
+    try { drawBar(); } catch (e) { console.log('COOP bar error ' + e); }
     const g = CoopGame.state(), s = scene, b = s.currentBattle;
     if (g.reward && CoopGame.uiMode() === 'MODIFIER_SELECT') {
-      const sig = 'reward ' + g.reward.round + g.reward.picker;
-      if (sig !== lastSig) { lastSig = sig; lastStates = {}; layer.removeAll(true); layer.add(cornerTag(g.reward.picker, g.reward.round === 1 ? '先挑' : '挑剩下的')); }
+      const sig = 'reward ' + g.reward.round + g.reward.picker + (g.reward.single ? 's' : '');
+      if (sig !== lastSig) {
+        lastSig = sig; lastStates = {}; layer.removeAll(true);
+        layer.add(cornerTag(g.reward.picker, g.reward.single ? '挑奖励' : g.reward.round === 1 ? '先挑' : '挑剩下的'));
+      }
       return;
     }
     if (g.starters && g.starters.picker && CoopGame.uiMode() === 'STARTER_SELECT') {
@@ -98,7 +179,7 @@
       if (sig !== lastSig) {
         lastSig = sig; lastStates = {}; layer.removeAll(true);
         // bottom-left, over the keyboard hint (the filter bar along the top is in use)
-        layer.add(cornerTag(t.picker, '挑 · 1P 剩 ' + t.left.p1 + ' 点 · 2P 剩 ' + t.left.p2 + ' 点', 2, 162));
+        layer.add(cornerTag(t.picker, '挑 · 1P 剩 ' + t.left.p1 + ' 点 · 2P 剩 ' + t.left.p2 + ' 点', 2, 160));
       }
       return;
     }
@@ -172,7 +253,10 @@
   const wait = setInterval(() => {
     if (!window.CoopGame) return;
     clearInterval(wait);
-    CoopGame.on((type, data) => { if (type === 'turnstart') flash(data); });
+    CoopGame.on((type, data) => {
+      if (type === 'turnstart') flash(data);
+      if (type === 'say') { try { sayBubble(data); } catch (e) { console.log('COOP say error ' + e); } }
+    });
     setInterval(() => { try { draw(); } catch (e) { console.log('COOP overlay error ' + e); } }, 100);
   }, 200);
 })();
