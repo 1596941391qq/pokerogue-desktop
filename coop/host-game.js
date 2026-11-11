@@ -176,6 +176,13 @@ window.CoopGame = (function () {
     if (f >= 0) { e.stopImmediatePropagation(); e.preventDefault(); if (!e.repeat) shout('p1', f); return; } // 1P's shouts
     if (st.owner === 'p2' && online()) { e.stopImmediatePropagation(); e.preventDefault(); }
   }, true);
+  // Same rule for the game's on-screen touch buttons (1P hosting from a phone): they feed the game directly,
+  // not through key events, so their presses are stopped here. Releases always pass so no button sticks.
+  for (const type of ['touchstart', 'pointerdown']) window.addEventListener(type, e => {
+    if (!e.isTrusted || !(st.owner === 'p2' && online())) return;
+    const tc = document.getElementById('touchControls');
+    if (tc && e.target instanceof Node && tc.contains(e.target)) { e.stopImmediatePropagation(); e.preventDefault(); }
+  }, { capture: true, passive: false });
 
   const enemyName = (s, bi) => { const e = s.getEnemyField().find(x => x && x.getBattlerIndex() === bi); return e ? nameOf(e) : ''; };
   const say = (s, i) => !i ? '' : i.state === 'thinking' ? '思考中…' : i.kind ? i.kind
