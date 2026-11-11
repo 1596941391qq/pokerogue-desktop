@@ -250,6 +250,7 @@ function createWindow() {
 
 async function runSmoke(win) {
   await new Promise(r => win.webContents.once('did-finish-load', r))
+  if (process.env.PRS_SMOKE_COOP) setTimeout(() => openCoopRoom(process.env.PRS_SMOKE_COOP), 8000) // also check co-op loads
   await new Promise(r => setTimeout(r, Number(process.env.PRS_SMOKE_WAIT) || 25000))
   // Read-only: report which save slots exist (names only, never contents).
   const result = await win.webContents.executeJavaScript(`(() => ({
@@ -259,6 +260,8 @@ async function runSmoke(win) {
   }))()`)
   result.userData = app.getPath('userData')
   result.saveCheck = saveCheck
+  if (coop) result.coop = { room: coop.room, status: coop.status, roomWindow: !!(coop.win && !coop.win.isDestroyed() && /coop-room\.html/.test(coop.win.webContents.getURL())),
+    hooks: await win.webContents.executeJavaScript('({game:!!window.CoopGame,teams:!!window.PRS_COOP_TEAMS,scene:!!window.PRS_SCENE})') }
   writeFileSync(smoke, (await win.webContents.capturePage()).toPNG())
   writeFileSync(smoke + '.json', JSON.stringify(result)) // Windows GUI builds have no reliable stdout
   console.log('SMOKE ' + JSON.stringify(result))
