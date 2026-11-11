@@ -102,7 +102,9 @@
     const on = CoopGame.online(), ever = CoopGame.everJoined();
     const room = String(window.PRS_COOP_ROOM || 'TEST').toUpperCase();
     const turn = g.owner ? (g.stage ? (g.owner === 'p1' ? '1P' : '2P') + ' 出招' : '轮到 ' + (g.owner === 'p1' ? '1P' : '2P')) : '';
-    const pos = BAR_POS[mode] || BAR_POS.default;
+    // the starter screen's own menus (OPTION_SELECT, CONFIRM...) sit over the same screen: keep the bar at the bottom
+    const picking = CoopGame.phaseName() === 'SelectStarterPhase';
+    const pos = BAR_POS[mode] || (picking ? BAR_POS.STARTER_SELECT : BAR_POS.default);
     const sig = [room, on, ever, turn, g.owner, pos.join()].join('|');
     if (sig === barSig) return;
     barSig = sig;
