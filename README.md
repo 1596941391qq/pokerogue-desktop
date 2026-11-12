@@ -14,6 +14,10 @@
 | `prsYYMMDD-pc.zip` | Windows 玩家，电脑性能一般的推荐用这个。解压后双击「启动游戏.exe」 |
 | `prsYYMMDD-mac-arm64.dmg` | M 芯片的 Mac（M1 及以后） |
 
+GitHub 下载慢或打不开的话，用**夸克网盘**（国内下载快）：<https://pan.quark.cn/s/365049b0755c>。里面放 Windows 压缩包（`pc.zip`）和安卓 APK，Mac 版只在 GitHub。
+
+下载永远免费。愿意支持的话可以去**爱发电**自愿赞助：<https://afdian.com/a/pokerogues>
+
 ### 老玩家升级
 
 直接下新版用就行，**存档会自动接上**：
