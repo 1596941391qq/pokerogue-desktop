@@ -3,6 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { randomInt } from 'node:crypto'
+import { lanAddresses, startLanServer } from './coop-lan.mjs'
 
 // Electron is pinned to 44 (Chromium 152) on purpose: Electron 45 (Chromium 156) draws the lines of
 // PokéRogue's multi-line menus on top of each other (title menu unreadable). Re-check before upgrading.
@@ -20,7 +21,10 @@ app.setName(DATA_DIR_NAME)
 // switch) and the two test switches below; the packaged game ignores them.
 const dev = !app.isPackaged
 app.setPath('userData', ((smoke || dev) && process.env.PRS_DATA_DIR) || path.join(app.getPath('appData'), DATA_DIR_NAME))
-const coopAuto = dev && process.env.PRS_COOP_AUTO // dev: open this co-op room right after the game loads
+const coopAuto = dev && process.env.PRS_COOP_AUTO // dev: open this co-op room right after the game loads (PRS_COOP_LAN=1: a LAN room)
+// Co-op: give 2P this computer's real LAN address instead of a random .local name. A LAN room has no STUN
+// server, and not every phone browser can look those names up; with the address the two always find each other.
+app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns')
 const skipAbout = smoke || coopAuto || (dev && process.env.PRS_SKIP_ABOUT)
 
 const packAssets = app.isPackaged ? path.join(process.resourcesPath, 'pack-assets') : path.join(__dirname, 'pack-assets')
@@ -60,7 +64,8 @@ const COOP_SCRIPTS = ['coop.js', 'host.js', 'host-team.js', 'host-game.js', 'hos
 const COOP_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // no 0/O/1/I: the code is read aloud and typed on a phone
 let gameWin = null
 let gamePageReady = false // the game page finished loading, scripts can be injected
-let coop = null // { room, link, win (info window, may be closed), status: [text, kind] } while a room is open
+let coop = null // { room, link, win (info window, may be closed), status: [text, kind], lan? } while a room is open
+// lan (LAN room only): { origin (this app's own server, coop-lan.mjs), links (one per network address), close() }
 
 // Enemy HP with two players: the host picks, kept in the game page's localStorage (coop/host-team.js reads it).
 const COOP_HP = [[1, '1 倍（和单人一样）'], [1.5, '1.5 倍（默认）'], [2, '2 倍（困难）']]
@@ -78,6 +83,7 @@ async function syncCoopHpMenu() {
 }
 const coopItems = [
   { label: '开房间（我当 1P）', click: () => openCoopRoom() },
+  { label: '开局域网房间（同一个 Wi-Fi，不用外网）', click: () => openCoopRoom(null, true) },
   { label: '关闭房间', click: () => closeCoopRoom() },
   { type: 'separator' },
   { label: '敌人血量（下一场战斗起生效）', submenu: COOP_HP.map(([v, label]) => ({ label, type: 'radio', id: 'coop-hp-' + v, checked: v === 1.5, click: () => setCoopHp(v) })) },
@@ -90,7 +96,8 @@ const template = isMac
 
 async function injectCoop() {
   const wc = gameWin.webContents
-  await wc.executeJavaScript(`window.PRS_COOP_ROOM=${JSON.stringify(coop.room)};0`)
+  // COOP_ORIGIN / COOP_ICE: where coop.js finds the signaling server (online one, or this app's own in a LAN room)
+  await wc.executeJavaScript(`window.PRS_COOP_ROOM=${JSON.stringify(coop.room)};window.COOP_ORIGIN=${JSON.stringify(coop.lan ? coop.lan.origin : COOP_ORIGIN)};window.COOP_ICE=${coop.lan ? '[]' : 'undefined'};0`)
   for (const f of COOP_SCRIPTS) await wc.executeJavaScript(readFileSync(path.join(__dirname, 'coop', f), 'utf8') + '\n;0')
 }
 
@@ -113,8 +120,8 @@ function onCoopLog(msg) {
 function showCoopWindow() {
   if (coop.win && !coop.win.isDestroyed()) { coop.win.show(); return }
   const win = coop.win = new BrowserWindow({
-    parent: gameWin, width: 440, height: 272, useContentSize: true, resizable: false, minimizable: false, maximizable: false,
-    fullscreenable: false, alwaysOnTop: true, icon, title: `合作房间 ${coop.room}`, autoHideMenuBar: true, backgroundColor: '#2b2633',
+    parent: gameWin, width: 440, height: coop.lan ? 416 : 272, useContentSize: true, resizable: false, minimizable: false, maximizable: false,
+    fullscreenable: false, alwaysOnTop: true, icon, title: `${coop.lan ? '局域网房间' : '合作房间'} ${coop.room}`, autoHideMenuBar: true, backgroundColor: '#2b2633',
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   })
   win.setMenu(null)
@@ -122,16 +129,34 @@ function showCoopWindow() {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('console-message', e => {
     if (e.message === 'COOPROOM copy' && coop) clipboard.writeText(coop.link)
+    const pick = /^COOPROOM pick (\d+)$/.exec(e.message) // LAN room: another of this computer's addresses
+    if (pick && coop?.lan?.links[+pick[1]]) coop.link = coop.lan.links[+pick[1]]
   })
   win.webContents.once('did-finish-load', () => { if (coop) setCoopStatus(...coop.status) })
-  win.loadFile(path.join(packAssets, 'coop-room.html'), { query: { room: coop.room, link: coop.link } })
+  win.loadFile(path.join(packAssets, 'coop-room.html'), { query: { room: coop.room, link: coop.link, ...(coop.lan ? { lan: JSON.stringify(coop.lan.links) } : {}) } })
 }
 
-async function openCoopRoom(room) {
+async function openCoopRoom(room, lan = false) {
   if (!gameWin || gameWin.isDestroyed()) return
   if (coop) { showCoopWindow(); return } // one room at a time: show its info again
   room = (room || Array.from({ length: 6 }, () => COOP_CODE_CHARS[randomInt(COOP_CODE_CHARS.length)]).join('')).toUpperCase()
-  coop = { room, link: `${COOP_ORIGIN}/coop/guest2.html?room=${room}&auto=1`, win: null, status: ['正在开房间…', ''] }
+  const mine = coop = { room, link: `${COOP_ORIGIN}/coop/guest2.html?room=${room}&auto=1`, win: null, status: ['正在开房间…', ''] }
+  if (lan) {
+    // LAN room: this app serves the 2P page and the signaling itself (coop-lan.mjs); nothing leaves the local network.
+    const addrs = lanAddresses()
+    try {
+      if (!addrs.length) throw new Error('这台电脑没有连上局域网（Wi-Fi 或网线）')
+      const srv = await startLanServer(path.join(__dirname, 'coop'), room)
+      if (coop !== mine) { srv.close(); return }
+      const links = addrs.map(a => `http://${a}:${srv.port}/coop/guest2.html?room=${room}&auto=1`)
+      coop.lan = { origin: `http://127.0.0.1:${srv.port}`, links, close: srv.close }
+      coop.link = links[0]
+    } catch (e) {
+      coop = null
+      dialog.showMessageBox(gameWin, { type: 'error', icon, title: '局域网房间', message: '开局域网房间失败', detail: String(e?.message || e) })
+      return
+    }
+  }
   showCoopWindow()
   try {
     if (gamePageReady) await injectCoop() // otherwise did-finish-load injects
@@ -149,6 +174,7 @@ function closeCoopRoom() {
   })
   if (choice !== 0) return
   const info = coop.win
+  coop.lan?.close()
   coop = null
   if (info && !info.isDestroyed()) info.destroy()
   gameWin.webContents.reload() // a fresh page has none of the injected co-op scripts
@@ -235,6 +261,7 @@ function createWindow() {
   gameWin = win
   win.on('closed', () => {
     if (coop?.win && !coop.win.isDestroyed()) coop.win.destroy()
+    coop?.lan?.close()
     coop = null
     gameWin = null
     gamePageReady = false
@@ -249,7 +276,7 @@ function createWindow() {
     gamePageReady = true
     syncCoopHpMenu()
     if (coop) injectCoop().catch(e => setCoopStatus('开房间失败：' + (e?.message || e), 'bad'))
-    else if (coopAuto && !win.coopAutoDone) { win.coopAutoDone = true; openCoopRoom(coopAuto) }
+    else if (coopAuto && !win.coopAutoDone) { win.coopAutoDone = true; openCoopRoom(coopAuto, !!process.env.PRS_COOP_LAN) }
   })
   // Links inside the game (wiki, Discord…) open in the normal browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -267,7 +294,7 @@ function createWindow() {
 
 async function runSmoke(win) {
   await new Promise(r => win.webContents.once('did-finish-load', r))
-  if (process.env.PRS_SMOKE_COOP) setTimeout(() => openCoopRoom(process.env.PRS_SMOKE_COOP), 8000) // also check co-op loads
+  if (process.env.PRS_SMOKE_COOP) setTimeout(() => openCoopRoom(process.env.PRS_SMOKE_COOP, !!process.env.PRS_COOP_LAN), 8000) // also check co-op loads
   await new Promise(r => setTimeout(r, Number(process.env.PRS_SMOKE_WAIT) || 25000))
   // Read-only: report which save slots exist (names only, never contents).
   const result = await win.webContents.executeJavaScript(`(() => ({
@@ -277,7 +304,7 @@ async function runSmoke(win) {
   }))()`)
   result.userData = app.getPath('userData')
   result.saveCheck = saveCheck
-  if (coop) result.coop = { room: coop.room, status: coop.status, roomWindow: !!(coop.win && !coop.win.isDestroyed() && /coop-room\.html/.test(coop.win.webContents.getURL())),
+  if (coop) result.coop = { room: coop.room, status: coop.status, link: coop.link, roomWindow: !!(coop.win && !coop.win.isDestroyed() && /coop-room\.html/.test(coop.win.webContents.getURL())),
     hooks: await win.webContents.executeJavaScript('({game:!!window.CoopGame,teams:!!window.PRS_COOP_TEAMS,scene:!!window.PRS_SCENE})') }
   writeFileSync(smoke, (await win.webContents.capturePage()).toPNG())
   writeFileSync(smoke + '.json', JSON.stringify(result)) // Windows GUI builds have no reliable stdout

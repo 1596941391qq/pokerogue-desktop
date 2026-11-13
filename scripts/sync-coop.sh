@@ -12,4 +12,6 @@ for f in coop.js host.js host-team.js host-game.js host-overlay.js; do
   node --check "$SRC/$f"   # never bundle a half-edited script
   cp "$SRC/$f" "$ROOT/coop/$f"
 done
+# the 2P page itself, served by coop-lan.mjs in a LAN room (coop.js is shared by both sides)
+cp "$SRC/guest2.html" "$ROOT/coop/guest2.html"
 echo "coop/ <- $SRC"

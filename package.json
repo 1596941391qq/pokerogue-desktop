@@ -23,7 +23,7 @@
     "buildVersion": "1.12.2.6",
     "copyright": "PokéRogue © Pagefault Games (AGPL-3.0) · 打包：黑咖啡和冰月亮",
     "directories": { "output": "release" },
-    "files": ["main.mjs", "game-version.json", "package.json", "coop/**/*", "dist/**/*", "!dist/**/*.map"],
+    "files": ["main.mjs", "coop-lan.mjs", "game-version.json", "package.json", "coop/**/*", "dist/**/*", "!dist/**/*.map"],
     "extraResources": [
       { "from": "pack-assets", "to": "pack-assets", "filter": ["*.png", "*.ico", "*.html", "*.js"] }
     ],

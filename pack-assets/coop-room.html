@@ -18,6 +18,10 @@
   button { padding: 5px 14px; border: 0; border-radius: 5px; background: #6d5bd0; color: #fff; font-size: 13px; cursor: pointer; }
   button:active { background: #5747b3; }
   p { margin: 10px 0 0; font-size: 12px; color: #b3abc0; }
+  #lan { display: none; margin-top: 10px; padding: 8px 10px; border-radius: 6px; background: #1f1b26; font-size: 12px; color: #d9d3e3; }
+  #lan b { color: #f5c84c; }
+  #alts button { margin: 4px 6px 0 0; padding: 2px 8px; background: #5a5266; font: 12px ui-monospace, Menlo, Consolas, monospace; }
+  #alts button.on { background: #6d5bd0; }
 </style>
 </head>
 <body>
@@ -27,24 +31,29 @@
       <div class="lbl">房间号</div>
       <div id="code"></div>
       <div id="status">正在开房间…</div>
-      <div class="lbl" style="margin-top:8px">队友用手机扫码，或打开下面的链接</div>
+      <div class="lbl" id="how" style="margin-top:8px">队友用手机扫码，或打开下面的链接</div>
     </div>
   </div>
   <div class="link"><input id="link" readonly><button id="copy">复制</button></div>
+  <div id="lan"><b>局域网房间</b>：不走外网，队友要和这台电脑连<b>同一个 Wi-Fi / 路由器</b>，用手机或电脑的浏览器打开。打不开时：系统弹出防火墙提示请点「允许」；确认手机连的是 Wi-Fi 不是流量；<span id="altTip">或换下面另一个地址。</span><div id="alts"></div></div>
   <p>合作规则（双打、各自 10 点和 3 个队伍位置、钱和精灵球各一份、5 选 2）只对开房间之后新开的一局生效，请在标题画面开房间，再开始新游戏或读取合作存档。敌人血量在菜单「合作模式 → 敌人血量」里调。关掉这个小窗不会关房间。</p>
 <script src="qrcode.js"></script>
 <script>
   // Opened by main.mjs with ?room=CODE&link=<join link>; main.mjs calls setStatus() as the game page logs COOP lines.
-  const q = new URLSearchParams(location.search), link = q.get('link') || ''
+  const q = new URLSearchParams(location.search)
+  let link = q.get('link') || ''
+  let lan = null
+  try { lan = JSON.parse(q.get('lan') || 'null') } catch (e) {}
   document.getElementById('code').textContent = q.get('room') || ''
   const input = document.getElementById('link')
-  input.value = link
   input.onclick = () => input.select()
   window.setStatus = (text, kind) => { const s = document.getElementById('status'); s.textContent = text; s.className = kind || '' }
   // main.mjs listens for this console line and writes the link to the system clipboard.
   const copy = document.getElementById('copy')
   copy.onclick = () => { console.log('COOPROOM copy'); copy.textContent = '已复制'; setTimeout(() => { copy.textContent = '复制' }, 1500) }
-  try {
+  function draw() {
+   input.value = link
+   try {
     const m = QRCodeCore.create(link, { errorCorrectionLevel: 'M' }).modules, quiet = 3, n = m.size + quiet * 2
     const c = document.getElementById('qr'), scale = Math.max(1, Math.floor(444 / n))
     c.width = c.height = n * scale
@@ -52,7 +61,22 @@
     g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height)
     g.fillStyle = '#000'
     for (let y = 0; y < m.size; y++) for (let x = 0; x < m.size; x++) if (m.data[y * m.size + x]) g.fillRect((x + quiet) * scale, (y + quiet) * scale, scale, scale)
-  } catch (e) { console.log('COOPROOM qr failed ' + e) }
+   } catch (e) { console.log('COOPROOM qr failed ' + e) }
+  }
+  draw()
+  if (lan) {
+    document.getElementById('lan').style.display = 'block'
+    document.getElementById('how').textContent = '队友连同一个 Wi-Fi 后扫码，或打开下面的链接'
+    const alts = document.getElementById('alts')
+    if (lan.length < 2) document.getElementById('altTip').textContent = ''
+    // this computer has several network addresses: let the host switch which one the QR code shows
+    else lan.forEach((l, i) => {
+      const b = document.createElement('button')
+      b.textContent = new URL(l).hostname; b.className = i ? '' : 'on'
+      b.onclick = () => { link = l; draw(); console.log('COOPROOM pick ' + i); alts.querySelectorAll('button').forEach(x => { x.className = x === b ? 'on' : '' }) }
+      alts.appendChild(b)
+    })
+  }
 </script>
 </body>
 </html>
