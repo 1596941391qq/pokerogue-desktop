@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // Patch the game build in dist/ for co-op mode (run at the end of scripts/fetch-game.sh, or alone:
 //   node scripts/patch-coop.mjs [distDir]).
-// All three patches are in assets/battle-scene-*.js and change nothing while no co-op room is open:
+// All four patches are in assets/battle-scene-*.js and change nothing while no co-op room is open:
 // 1. doubles: every battle is a double battle, only while window.PRS_COOP_TEAMS is set (coop/host-team.js);
 // 2. scene:   the battle scene is exposed as window.PRS_SCENE for the co-op scripts;
-// 3. points:  the starter points limit doubles while window.PRS_COOP_TEAMS is set (each player gets their own).
+// 3. points:  the starter points limit doubles while window.PRS_COOP_TEAMS is set (each player gets their own);
+// 4. full:    after a catch the game asks "party full, release one?" also when window.PRS_COOP_FULL() says so
+//             (the catcher already has their three of the six slots; coop/host-team.js).
 // Each patch must match exactly once (or already be applied), otherwise the script fails: the game build
 // changed and the patches below need updating.
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -15,6 +17,7 @@ const PATCHES = [
   ['doubles', 'doCheckDoubleOverride(e){switch(bl.FIELD_SIZE_OVERRIDE){', 'doCheckDoubleOverride(e){switch(window.PRS_COOP_TEAMS?`double`:bl.FIELD_SIZE_OVERRIDE){'],
   ['scene', 'window.gameInfo=t}getActiveKeys(){', 'window.gameInfo=t;window.PRS_SCENE=this}getActiveKeys(){'],
   ['points', 'default:e.value=10}return In(1,e),e.value}', 'default:e.value=10}return In(1,e),e.value*(window.PRS_COOP_TEAMS?2:1)}'],
+  ['full', 'if(B.getPlayerParty().length===6){let e={options:[{label:q.t(`partyUiHandler:summary`)', 'if(B.getPlayerParty().length===6||window.PRS_COOP_FULL&&window.PRS_COOP_FULL()){let e={options:[{label:q.t(`partyUiHandler:summary`)'],
 ]
 const count = (s, sub) => s.split(sub).length - 1
 

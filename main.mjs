@@ -53,7 +53,7 @@ const helpItems = [
 
 // Co-op mode (2 players): this app is 1P and hosts the game; 2P joins from a phone browser, sees the game
 // as a video stream and sends button presses. The scripts in coop/ (copied by scripts/sync-coop.sh) are
-// injected into the game page when a room is opened; dist/ carries three small hooks for them
+// injected into the game page when a room is opened; dist/ carries four small hooks for them
 // (scripts/patch-coop.mjs) that do nothing while no room is open.
 const COOP_ORIGIN = 'https://192.220.36.155:8790' // signaling server + phone page; its certificate is a normal trusted one
 const COOP_SCRIPTS = ['coop.js', 'host.js', 'host-team.js', 'host-game.js', 'host-overlay.js'] // order matters
@@ -62,9 +62,25 @@ let gameWin = null
 let gamePageReady = false // the game page finished loading, scripts can be injected
 let coop = null // { room, link, win (info window, may be closed), status: [text, kind] } while a room is open
 
+// Enemy HP with two players: the host picks, kept in the game page's localStorage (coop/host-team.js reads it).
+const COOP_HP = [[1, '1 倍（和单人一样）'], [1.5, '1.5 倍（默认）'], [2, '2 倍（困难）']]
+function setCoopHp(v) {
+  if (!gameWin || gameWin.isDestroyed() || !gamePageReady) return
+  gameWin.webContents.executeJavaScript(`try{localStorage.setItem('coop-enemy-hp','${v}')}catch(e){};window.CoopTeam&&CoopTeam.setHpMult&&CoopTeam.setHpMult(${v});0`).catch(() => {})
+}
+// tick the saved choice in the menu once the game page is up
+async function syncCoopHpMenu() {
+  try {
+    const v = Number(await gameWin.webContents.executeJavaScript(`(()=>{try{return localStorage.getItem('coop-enemy-hp')}catch(e){return null}})()`))
+    const item = Menu.getApplicationMenu()?.getMenuItemById('coop-hp-' + (COOP_HP.some(c => c[0] === v) ? v : 1.5))
+    if (item) item.checked = true
+  } catch {}
+}
 const coopItems = [
   { label: '开房间（我当 1P）', click: () => openCoopRoom() },
   { label: '关闭房间', click: () => closeCoopRoom() },
+  { type: 'separator' },
+  { label: '敌人血量（下一场战斗起生效）', submenu: COOP_HP.map(([v, label]) => ({ label, type: 'radio', id: 'coop-hp-' + v, checked: v === 1.5, click: () => setCoopHp(v) })) },
 ]
 
 // Windows keeps the old one-click top-level items; macOS needs submenus plus the standard app/edit menus.
@@ -231,6 +247,7 @@ function createWindow() {
   win.webContents.on('did-start-navigation', e => { if (e.isMainFrame && !e.isSameDocument) gamePageReady = false })
   win.webContents.on('did-finish-load', () => {
     gamePageReady = true
+    syncCoopHpMenu()
     if (coop) injectCoop().catch(e => setCoopStatus('开房间失败：' + (e?.message || e), 'bad'))
     else if (coopAuto && !win.coopAutoDone) { win.coopAutoDone = true; openCoopRoom(coopAuto) }
   })
