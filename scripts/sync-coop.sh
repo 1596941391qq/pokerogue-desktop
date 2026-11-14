@@ -7,7 +7,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="${COOP_PUBLIC:-$HOME/p302-preview/outputs/pokerogue-coop/server/public}"
 mkdir -p "$ROOT/coop"
-for f in coop.js host.js host-team.js host-game.js host-overlay.js; do
+# pack mods/*/ into mods-bundle.js first (the mod loader is host-mods.js)
+node "$SRC/../../tools/build-mods.mjs" "$SRC"
+for f in coop.js host.js host-team.js host-game.js host-overlay.js host-mods.js mods-bundle.js; do
   [ -f "$SRC/$f" ] || { echo "missing $SRC/$f" >&2; exit 1; }
   node --check "$SRC/$f"   # never bundle a half-edited script
   cp "$SRC/$f" "$ROOT/coop/$f"

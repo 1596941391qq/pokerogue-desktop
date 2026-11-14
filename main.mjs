@@ -60,7 +60,7 @@ const helpItems = [
 // injected into the game page when a room is opened; dist/ carries four small hooks for them
 // (scripts/patch-coop.mjs) that do nothing while no room is open.
 const COOP_ORIGIN = 'https://192.220.36.155:8790' // signaling server + phone page; its certificate is a normal trusted one
-const COOP_SCRIPTS = ['coop.js', 'host.js', 'host-team.js', 'host-game.js', 'host-overlay.js'] // order matters
+const COOP_SCRIPTS = ['coop.js', 'host.js', 'host-team.js', 'host-game.js', 'host-overlay.js', 'host-mods.js', 'mods-bundle.js'] // order matters
 const COOP_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // no 0/O/1/I: the code is read aloud and typed on a phone
 let gameWin = null
 let gamePageReady = false // the game page finished loading, scripts can be injected
@@ -81,11 +81,19 @@ async function syncCoopHpMenu() {
     if (item) item.checked = true
   } catch {}
 }
+// The list of mods and their switches (coop/host-mods.js). Also works before a room is open: the two files
+// are injected on demand (host-mods.js ignores a second injection).
+function openModsPanel() {
+  if (!gameWin || gameWin.isDestroyed()) return
+  const js = ['host-mods.js', 'mods-bundle.js'].map(f => readFileSync(path.join(__dirname, 'coop', f), 'utf8')).join('\n;')
+  gameWin.webContents.executeJavaScript(`(()=>{if(!window.CoopMods){${js}\n}window.CoopMods&&CoopMods.openPanel();return 0})()`).catch(() => {})
+}
 const coopItems = [
   { label: '开房间（我当 1P）', click: () => openCoopRoom() },
   { label: '开局域网房间（同一个 Wi-Fi，不用外网）', click: () => openCoopRoom(null, true) },
   { label: '关闭房间', click: () => closeCoopRoom() },
   { type: 'separator' },
+  { label: 'Mod（民间创意工坊）…', click: () => openModsPanel() },
   { label: '敌人血量（下一场战斗起生效）', submenu: COOP_HP.map(([v, label]) => ({ label, type: 'radio', id: 'coop-hp-' + v, checked: v === 1.5, click: () => setCoopHp(v) })) },
 ]
 
