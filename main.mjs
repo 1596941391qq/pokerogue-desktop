@@ -280,6 +280,13 @@ function createWindow() {
   })
   // The page was loaded again (first load with a room pending, or the game reloading itself): the room stays open.
   win.webContents.on('did-start-navigation', e => { if (e.isMainFrame && !e.isSameDocument) gamePageReady = false })
+  // Before the game reads its saves: a save from a newer game version must not lock the game (coop/save-guard.js).
+  win.webContents.on('dom-ready', () => {
+    try {
+      const guard = readFileSync(path.join(__dirname, 'coop', 'save-guard.js'), 'utf8')
+      win.webContents.executeJavaScript(`window.PRS_GAME_VERSION=${JSON.stringify(gameVersion)};\n${guard}\n;0`).catch(() => {})
+    } catch {}
+  })
   win.webContents.on('did-finish-load', () => {
     gamePageReady = true
     syncCoopHpMenu()
@@ -309,6 +316,7 @@ async function runSmoke(win) {
     origin: location.origin || location.protocol, canvas: !!document.querySelector('canvas'),
     saveKeys: Object.keys(localStorage).filter(k => /^(data|sessionData)/.test(k)).sort(),
     otherKeys: Object.keys(localStorage).filter(k => !/^(data|sessionData)/.test(k)).sort(),
+    saveGuard: window.PRS_SAVE_GUARD ? window.PRS_SAVE_GUARD.version : null,
   }))()`)
   result.userData = app.getPath('userData')
   result.saveCheck = saveCheck
