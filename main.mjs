@@ -89,6 +89,7 @@ function openModsPanel() {
   gameWin.webContents.executeJavaScript(`(()=>{if(!window.CoopMods){${js}\n}window.CoopMods&&CoopMods.openPanel();return 0})()`).catch(() => {})
 }
 const coopItems = [
+  { label: '朋友不用装游戏：把房间链接发给他，用浏览器打开就行', enabled: false },
   { label: '开房间（我当 1P）', click: () => openCoopRoom() },
   { label: '开局域网房间（同一个 Wi-Fi，不用外网）', click: () => openCoopRoom(null, true) },
   { label: '关闭房间', click: () => closeCoopRoom() },
