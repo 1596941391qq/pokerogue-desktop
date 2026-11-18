@@ -10,6 +10,10 @@
 // 4. mefull:  the same for a Pokémon obtained in a mystery encounter (assets/loading-scene-*.js).
 // Gone since 11-14: "points" (doubled starter points; each player now picks in their own round with the
 // game's own limit). A build that still has it, or the earlier form of "full", is brought up to date.
+// 5. points, starteradd, starterrand, rewardtier (11-18, mod interface v3): four numbers the game has written in
+//             (starter points, how many starters, the rarity thresholds of a reward slot) are asked of
+//             window.PRS_POINTS / PRS_STARTER_MAX / PRS_T when those exist (the mod engine, coop/host-mods.js),
+//             and "full" / "mefull" ask window.PRS_PARTY_MAX outside a room. Asked for by Chess12333's 进阶 mod.
 // Everything else for twelve Pokémon is done at run time in coop/host-team.js, not here.
 // The same list is in pokerogue-android/scripts/patch-web.mjs and the co-op project's host-mac/patch-game.py.
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -20,13 +24,23 @@ import { fileURLToPath } from 'node:url'
 const PATCHES = [
   ['doubles', 'battle-scene', 'doCheckDoubleOverride(e){switch(bl.FIELD_SIZE_OVERRIDE){', 'doCheckDoubleOverride(e){switch(window.PRS_COOP_TEAMS?`double`:bl.FIELD_SIZE_OVERRIDE){', []],
   ['scene', 'battle-scene', 'window.gameInfo=t}getActiveKeys(){', 'window.gameInfo=t;window.PRS_SCENE=this}getActiveKeys(){', []],
-  // after a catch: "party full, release one?" is asked when the catcher has their six (the hook), not at six in all
-  ['full', 'battle-scene', 'if(B.getPlayerParty().length===6){let e={options:[{label:q.t(`partyUiHandler:summary`)', 'if((window.PRS_COOP_TEAMS&&window.PRS_COOP_FULL?window.PRS_COOP_FULL():B.getPlayerParty().length===6)){let e={options:[{label:q.t(`partyUiHandler:summary`)',
-    ['if(B.getPlayerParty().length===6||window.PRS_COOP_FULL&&window.PRS_COOP_FULL()){let e={options:[{label:q.t(`partyUiHandler:summary`)']],
+  // after a catch: "party full, release one?" is asked when the catcher has their six (the hook), not at six in all.
+  // Without a room: at window.PRS_PARTY_MAX() in the party (the mod engine; six when no mod says otherwise)
+  ['full', 'battle-scene', 'if(B.getPlayerParty().length===6){let e={options:[{label:q.t(`partyUiHandler:summary`)', 'if((window.PRS_COOP_TEAMS&&window.PRS_COOP_FULL?window.PRS_COOP_FULL():B.getPlayerParty().length>=(window.PRS_PARTY_MAX?window.PRS_PARTY_MAX():6))){let e={options:[{label:q.t(`partyUiHandler:summary`)',
+    ['if(B.getPlayerParty().length===6||window.PRS_COOP_FULL&&window.PRS_COOP_FULL()){let e={options:[{label:q.t(`partyUiHandler:summary`)',
+      'if((window.PRS_COOP_TEAMS&&window.PRS_COOP_FULL?window.PRS_COOP_FULL():B.getPlayerParty().length===6)){let e={options:[{label:q.t(`partyUiHandler:summary`)']],
   // the same question for a Pokémon obtained in a mystery encounter
-  ['mefull', 'loading-scene', 'if(b.getPlayerParty().length===6){let t={options:[{label:k.t(`partyUiHandler:summary`)', 'if((window.PRS_COOP_TEAMS&&window.PRS_COOP_FULL?window.PRS_COOP_FULL():b.getPlayerParty().length===6)){let t={options:[{label:k.t(`partyUiHandler:summary`)', []],
-  // taken out again (until 11-14 the starter points limit was doubled; now each player has their own round)
-  ['points-off', 'battle-scene', null, 'default:e.value=10}return In(1,e),e.value}', ['default:e.value=10}return In(1,e),e.value*(window.PRS_COOP_TEAMS?2:1)}']],
+  ['mefull', 'loading-scene', 'if(b.getPlayerParty().length===6){let t={options:[{label:k.t(`partyUiHandler:summary`)', 'if((window.PRS_COOP_TEAMS&&window.PRS_COOP_FULL?window.PRS_COOP_FULL():b.getPlayerParty().length>=(window.PRS_PARTY_MAX?window.PRS_PARTY_MAX():6))){let t={options:[{label:k.t(`partyUiHandler:summary`)',
+    ['if((window.PRS_COOP_TEAMS&&window.PRS_COOP_FULL?window.PRS_COOP_FULL():b.getPlayerParty().length===6)){let t={options:[{label:k.t(`partyUiHandler:summary`)']],
+  // limits a mod may change (mod interface v3, coop/host-mods.js defines the window.PRS_* functions; each answers
+  // the game's own number while no mod says otherwise). points: the starter points of a classic run (until
+  // 11-14 this place doubled them in a room: that form is brought up to date too)
+  ['points', 'battle-scene', 'default:e.value=10}return In(1,e),e.value}', 'default:e.value=(window.PRS_POINTS?window.PRS_POINTS():10)}return In(1,e),e.value}', ['default:e.value=10}return In(1,e),e.value*(window.PRS_COOP_TEAMS?2:1)}']],
+  // how many starters may be picked (adding one, and the "random" button)
+  ['starteradd', 'battle-scene', 'this.partyStarterIds.length<6', 'this.partyStarterIds.length<(window.PRS_STARTER_MAX?window.PRS_STARTER_MAX():6)', []],
+  ['starterrand', 'battle-scene', 'this.partyStarterIds.length>=6', 'this.partyStarterIds.length>=(window.PRS_STARTER_MAX?window.PRS_STARTER_MAX():6)', []],
+  // the rarity of a reward slot: the roll of 0..1023 against three thresholds
+  ['rewardtier', 'loading-scene', 't>255?0:t>60?1:t>12?2:t?3:4', 't>(window.PRS_T?window.PRS_T(2):255)?0:t>(window.PRS_T?window.PRS_T(1):60)?1:t>(window.PRS_T?window.PRS_T(0):12)?2:t?3:4', []],
 ]
 const count = (s, sub) => s.split(sub).length - 1
 

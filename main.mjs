@@ -81,12 +81,17 @@ async function syncCoopHpMenu() {
     if (item) item.checked = true
   } catch {}
 }
-// The list of mods and their switches (coop/host-mods.js). Also works before a room is open: the two files
-// are injected on demand (host-mods.js ignores a second injection).
+// The mod engine and the mods of this package (coop/host-mods.js, coop/mods-bundle.js). Since mod interface v3
+// a mod may also run in a single-player game, so the two files go into every page load; host-mods.js ignores
+// a second injection, and with no mod switched on it touches nothing of the game.
+const modsJs = () => ['host-mods.js', 'mods-bundle.js'].map(f => readFileSync(path.join(__dirname, 'coop', f), 'utf8')).join('\n;')
+function injectMods(win) {
+  try { return win.webContents.executeJavaScript(`(()=>{if(!window.CoopMods){${modsJs()}\n}return 0})()`).catch(() => {}) } catch { return Promise.resolve() }
+}
+// The list of mods and their switches. Also works before a room is open.
 function openModsPanel() {
   if (!gameWin || gameWin.isDestroyed()) return
-  const js = ['host-mods.js', 'mods-bundle.js'].map(f => readFileSync(path.join(__dirname, 'coop', f), 'utf8')).join('\n;')
-  gameWin.webContents.executeJavaScript(`(()=>{if(!window.CoopMods){${js}\n}window.CoopMods&&CoopMods.openPanel();return 0})()`).catch(() => {})
+  gameWin.webContents.executeJavaScript(`(()=>{if(!window.CoopMods){${modsJs()}\n}window.CoopMods&&CoopMods.openPanel();return 0})()`).catch(() => {})
 }
 const coopItems = [
   { label: '朋友不用装游戏：把房间链接发给他，用浏览器打开就行', enabled: false },
@@ -291,6 +296,7 @@ function createWindow() {
   win.webContents.on('did-finish-load', () => {
     gamePageReady = true
     syncCoopHpMenu()
+    injectMods(win)
     if (coop) injectCoop().catch(e => setCoopStatus('开房间失败：' + (e?.message || e), 'bad'))
     else if (coopAuto && !win.coopAutoDone) { win.coopAutoDone = true; openCoopRoom(coopAuto, !!process.env.PRS_COOP_LAN) }
   })
@@ -318,6 +324,7 @@ async function runSmoke(win) {
     saveKeys: Object.keys(localStorage).filter(k => /^(data|sessionData)/.test(k)).sort(),
     otherKeys: Object.keys(localStorage).filter(k => !/^(data|sessionData)/.test(k)).sort(),
     saveGuard: window.PRS_SAVE_GUARD ? window.PRS_SAVE_GUARD.version : null,
+    mods: window.CoopMods ? { api: CoopMods.apiVersion, list: CoopMods.list().map(m => [m.id, m.on, m.running]), limits: typeof window.PRS_PARTY_MAX === 'function' ? [window.PRS_PARTY_MAX(), window.PRS_STARTER_MAX(), window.PRS_POINTS()] : null } : null, // loaded on every page since mod interface v3
   }))()`)
   result.userData = app.getPath('userData')
   result.saveCheck = saveCheck
