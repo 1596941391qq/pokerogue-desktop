@@ -161,9 +161,29 @@ check('野外宝可梦 +10', meta().points === 280, 'points=' + meta().points)
 // 面板（真的打开一次）
 check('面板能打开', window.CoopMods.openPanel() === true)
 const panel = document.body.children[document.body.children.length - 1]
-const buttons = []
-walk(panel, (n, p) => { if (n.tag === 'button') buttons.push({ n, p }) })
-check('面板里有按钮', buttons.length >= 3, 'buttons=' + buttons.length)
+// 面板每次重画都还是那一个卡片，按钮要从最新的树上找
+const panelNow = () => document.body.children[document.body.children.length - 1]
+const buttonsNow = () => { const out = []; walk(panelNow(), (n, p) => { if (n.tag === 'button') out.push({ n, p }) }); return out }
+const toggleBtn = () => buttonsNow().find(b => /展开成长线|收起成长线/.test(b.n.textContent || ''))
+const upgradeBtns = () => buttonsNow().filter(b => /升级（|已满级/.test(b.n.textContent || ''))
+const click = b => { const fn = b && b.n.handlers.click && b.n.handlers.click[0]; if (fn) fn() }
+
+// ---- 折叠：默认只留顶上几行，点一下才铺开全部成长线 ----
+check('默认收起了成长线', upgradeBtns().length === 0, 'buttons=' + JSON.stringify(buttonsNow().map(b => b.n.textContent)))
+check('有展开按钮', !!toggleBtn(), JSON.stringify(buttonsNow().map(b => b.n.textContent)))
+check('收起时还是看得到当前效果', (() => { let t = ''; walk(panelNow(), n => { if (n.textContent) t += n.textContent + ' | ' }); return t.indexOf('当前效果：') >= 0 })(), '')
+click(toggleBtn())
+check('展开后成长线都在', upgradeBtns().length === 9, 'n=' + upgradeBtns().length)
+check('展开状态记下来了', meta().open === true, JSON.stringify(meta()))
+check('按钮变成收起', /收起成长线/.test(toggleBtn().n.textContent || ''), toggleBtn().n.textContent)
+click(toggleBtn())
+check('收起后成长线又没了', upgradeBtns().length === 0, 'n=' + upgradeBtns().length)
+check('收起状态也记下来了', meta().open === false, JSON.stringify(meta()))
+click(toggleBtn())
+check('再展开还是 9 条', upgradeBtns().length === 9, 'n=' + upgradeBtns().length)
+
+const buttons = buttonsNow()
+check('面板里有按钮', buttons.length >= 10, 'buttons=' + buttons.length)
 // 成长线的那一行（.set）：行 → 选项 → 按钮
 const lineRow = b => { const n = b.p && b.p.parent; return n && n.attrs && n.attrs.class === 'set' ? n : null }
 const rowText = b => { const n = lineRow(b); return n ? n.children.map(c => c.textContent || '').join(' | ') : '' }
@@ -173,7 +193,6 @@ check('运气那行有按钮', !!luckBtn, JSON.stringify(buttons.map(b => rowTex
 check('扭蛋机那行有按钮', !!gachaBtn, JSON.stringify(buttons.map(b => rowText(b))))
 const allText = () => { let out = []; walk(panel, n => { if (n.textContent) out.push(n.textContent) }); return out.join(' | ') }
 check('面板上有当前效果的汇总', allText().indexOf('当前效果：') >= 0, allText())
-const click = b => { const fn = b && b.n.handlers.click && b.n.handlers.click[0]; if (fn) fn() }
 
 // 升级「局内运气」（150 点）
 click(luckBtn)

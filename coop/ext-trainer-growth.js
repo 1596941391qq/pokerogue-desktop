@@ -50,7 +50,23 @@
       if (!def) return null;
       const m = metaOf(id);
       const on = X.isOn(id);
-      const rows = [X.el('div', { class: 'set' }, [X.el('div', { text: (def.title || '成长点') + '：' + Math.floor(m.points) + ' 点' })])];
+      const lines = def.lines || [];
+      // 成长线有十来条，全展开面板很长：默认只留顶上这几行，点一下「展开」才铺开。
+      // 展开状态记在局外数据里（m.open），下次打开面板还是原来那样。
+      const expanded = !!m.open;
+      const rows = [];
+      // 顶上一行：成长点 + 展开/收起
+      rows.push(X.el('div', { class: 'set' }, [
+        X.el('div', { text: (def.title || '成长点') + '：' + Math.floor(m.points) + ' 点' }),
+        X.el('div', { class: 'opts' }, [X.el('button', {
+          text: expanded ? '收起成长线 ▲' : '展开成长线 ▼（' + lines.length + ' 条）',
+          onclick: () => {
+            m.open = !expanded;
+            saveMeta(id);
+            render();
+          },
+        })]),
+      ]));
       if (!on) rows.push(X.el('div', { class: 'meta', text: '（打开这个 mod 才能用）' }));
       // 现在这些成长线加在一起是什么效果（mod 自己给一行汇总）
       if (def.summary) {
@@ -59,7 +75,8 @@
       }
       // 刚点了升级：告诉玩家升到了几级（面板会重画，这一行留在最上面）
       if (def.lastMsg) rows.push(X.el('div', { class: 'meta', text: def.lastMsg }));
-      for (const line of def.lines || []) {
+      // 收起来的时候下面什么都不画
+      for (const line of expanded ? lines : []) {
         const lv = Math.max(0, Math.min(line.max || 99, Math.floor(Number(m.lines[line.id]) || 0)));
         const cost = costOf(line, lv);
         const full = lv >= (line.max || 99);

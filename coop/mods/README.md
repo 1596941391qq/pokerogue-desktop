@@ -71,6 +71,9 @@ CoopMods.define('my-mod', function (api) {
     所以是永久的：升级、进化、换宝可梦都还在。只有玩家自己的宝可梦算数，敌人不算。
   - `api.meta()` / `api.metaSave()` / `api.metaPanel()` / `api.rng()`
   - 面板上会多两行：顶上「当前效果：」（mod 给的 `summary()`）和「刚升级：xxx → Lv2」
+  - 成长线是**收起来**的：面板里只留「成长点：N 点」和「当前效果：」两行，点一下
+    「展开成长线」才铺开全部成长线，再点一下收起。展开状态记在局外数据里（`meta.open`），
+    下次打开面板还是原来那样。
 
 扩展文件在 `coop/host-mods.js` 之后加载（`main.mjs` 的 `MOD_FILES`），所以引擎先起来，扩展再装钩子，
 mod 最后加载——mod 用到的钩子必须先由扩展 `X.addEvent()` 注册好。
