@@ -20,7 +20,7 @@
   "build": {
     "appId": "com.mengnieyu.pokerogue.desktop",
     "productName": "PokeRogue",
-    "buildVersion": "1.12.2.6",
+    "buildVersion": "1.12.2.8",
     "copyright": "PokéRogue © Pagefault Games (AGPL-3.0) · 打包：黑咖啡和冰月亮",
     "directories": { "output": "release" },
     "files": ["main.mjs", "coop-lan.mjs", "game-version.json", "package.json", "coop/**/*", "dist/**/*", "!dist/**/*.map"],
