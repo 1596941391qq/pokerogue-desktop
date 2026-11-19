@@ -56,6 +56,14 @@ xattr -cr /Applications/PokeRogue.app
 
 开发者：`scripts/patch-coop.mjs` 给 `dist/` 里的游戏打四处小补丁（`fetch-game` 结尾会自动跑，可重复跑）；`scripts/sync-coop.sh` 把合作脚本和 2P 页面拷进 `coop/`；局域网房间的服务在 `coop-lan.mjs`。
 
+## Mod（民间创意工坊）
+
+游戏菜单「合作模式 → Mod（民间创意工坊）…」里能打开 mod 列表，每个 mod 有开关，**改了马上生效**，开关记在这台电脑上，关掉不影响存档。游戏里自带两个：进阶（累积难度）和更好的联机道具。
+
+这个仓库自己写的 mod 放在 `coop/mods/<id>/`（`mod.json` + `mod.js`），改完跑 `npm run build:mods` 打包成 `coop/mods-local.js`，和上游那份 `coop/mods-bundle.js` 一起注入游戏。第一个是「训练家提升」：捕捉宝可梦攒成长点（同一只只算第一次，按稀有度给点），点数在局外攒着，用来提升这些成长线：扭蛋机蛋的稀有度、局内的运气、常驻的能力值（自己的每一只宝可梦的攻击/防御/特攻/特防/速度永久加成，换宝可梦、升级、进化都还在），还有战后奖励这一块——每场战斗的免费刷新次数、战后奖励的栏位。
+
+写法、接口和已知限制见 `coop/mods/README.md`；`npm run test:mods` 可以在没有游戏的情况下跑一遍规则。
+
 ## 自己构建
 
 ```bash

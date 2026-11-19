@@ -60,7 +60,7 @@ const helpItems = [
 // injected into the game page when a room is opened; dist/ carries four small hooks for them
 // (scripts/patch-coop.mjs) that do nothing while no room is open.
 const COOP_ORIGIN = 'https://192.220.36.155:8790' // signaling server + phone page; its certificate is a normal trusted one
-const COOP_SCRIPTS = ['coop.js', 'host.js', 'host-team.js', 'host-game.js', 'host-overlay.js', 'host-mods.js', 'mods-bundle.js'] // order matters
+const COOP_SCRIPTS = ['coop.js', 'host.js', 'host-team.js', 'host-game.js', 'host-overlay.js', 'host-mods.js', 'ext-trainer-growth.js', 'mods-bundle.js', 'mods-local.js'] // order matters
 const COOP_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // no 0/O/1/I: the code is read aloud and typed on a phone
 let gameWin = null
 let gamePageReady = false // the game page finished loading, scripts can be injected
@@ -81,17 +81,27 @@ async function syncCoopHpMenu() {
     if (item) item.checked = true
   } catch {}
 }
-// The mod engine and the mods of this package (coop/host-mods.js, coop/mods-bundle.js). Since mod interface v3
-// a mod may also run in a single-player game, so the two files go into every page load; host-mods.js ignores
-// a second injection, and with no mod switched on it touches nothing of the game.
-const modsJs = () => ['host-mods.js', 'mods-bundle.js'].map(f => readFileSync(path.join(__dirname, 'coop', f), 'utf8')).join('\n;')
+// The mod engine (coop/host-mods.js), the local engine extension (coop/ext-trainer-growth.js) and the mods:
+// the pack from the co-op project (coop/mods-bundle.js) and the one built from coop/mods/ (coop/mods-local.js).
+// Since mod interface v3 a mod may also run in a single-player game, so these files go into every page load;
+// host-mods.js ignores a second injection, and with no mod switched on it touches nothing of the game.
+const MOD_FILES = ['host-mods.js', 'ext-trainer-growth.js', 'mods-bundle.js', 'mods-local.js']
+// The game build has its own copy of the engine and of the upstream mods (dist/coop/), and the page loads
+// them by itself: window.CoopMods is already there when we get to inject. So the engine and the upstream
+// pack are only injected when they are missing, but our own files (the extension and the local mod pack)
+// always are: manifest() and define() ignore a second call, so injecting them twice is harmless.
+const LOCAL_FILES = ['ext-trainer-growth.js', 'mods-local.js']
+const readCoop = f => { try { return readFileSync(path.join(__dirname, 'coop', f), 'utf8') } catch { return '' } } // a missing file is not fatal
+const modsJs = () => MOD_FILES.map(readCoop).join('\n;')
+const localJs = () => LOCAL_FILES.map(readCoop).join('\n;')
+const injectCode = () => `(()=>{if(!window.CoopMods){${modsJs()}\n}else{${localJs()}\n}return 0})()`
 function injectMods(win) {
-  try { return win.webContents.executeJavaScript(`(()=>{if(!window.CoopMods){${modsJs()}\n}return 0})()`).catch(() => {}) } catch { return Promise.resolve() }
+  try { return win.webContents.executeJavaScript(injectCode()).catch(() => {}) } catch { return Promise.resolve() }
 }
 // The list of mods and their switches. Also works before a room is open.
 function openModsPanel() {
   if (!gameWin || gameWin.isDestroyed()) return
-  gameWin.webContents.executeJavaScript(`(()=>{if(!window.CoopMods){${modsJs()}\n}window.CoopMods&&CoopMods.openPanel();return 0})()`).catch(() => {})
+  gameWin.webContents.executeJavaScript(`(()=>{${injectCode()}\nwindow.CoopMods&&CoopMods.openPanel();return 0})()`).catch(() => {})
 }
 const coopItems = [
   { label: '朋友不用装游戏：把房间链接发给他，用浏览器打开就行', enabled: false },
@@ -112,7 +122,7 @@ async function injectCoop() {
   const wc = gameWin.webContents
   // COOP_ORIGIN / COOP_ICE: where coop.js finds the signaling server (online one, or this app's own in a LAN room)
   await wc.executeJavaScript(`window.PRS_COOP_ROOM=${JSON.stringify(coop.room)};window.COOP_ORIGIN=${JSON.stringify(coop.lan ? coop.lan.origin : COOP_ORIGIN)};window.COOP_ICE=${coop.lan ? '[]' : 'undefined'};0`)
-  for (const f of COOP_SCRIPTS) await wc.executeJavaScript(readFileSync(path.join(__dirname, 'coop', f), 'utf8') + '\n;0')
+  for (const f of COOP_SCRIPTS) { const code = readCoop(f); if (code) await wc.executeJavaScript(code + '\n;0') }
 }
 
 function setCoopStatus(text, kind = '') {

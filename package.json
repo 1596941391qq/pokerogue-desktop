@@ -9,13 +9,17 @@
   "main": "main.mjs",
   "scripts": {
     "fetch-game": "bash scripts/fetch-game.sh",
+    "build:mods": "node tools/build-mods.mjs",
+    "test:mods": "node tools/test-mods.mjs",
+    "prestart": "node tools/build-mods.mjs",
     "start": "electron .",
     "dist:win": "electron-builder --win portable zip --x64 --publish never",
     "dist:mac": "electron-builder --mac dmg --arm64 --publish never"
   },
   "devDependencies": {
     "electron": "44.10.2",
-    "electron-builder": "26.18.0"
+    "electron-builder": "26.18.0",
+    "undici": "7.30.2"
   },
   "build": {
     "appId": "com.mengnieyu.pokerogue.desktop",
