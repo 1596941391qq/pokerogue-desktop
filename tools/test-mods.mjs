@@ -319,5 +319,40 @@ check('奖励栏位变成 4 个', ph.getModifierCount() === 4, 'n=' + ph.getModi
   check('汇总行写着奖励栏位', txt.indexOf('奖励栏位 +1') >= 0, txt)
 }
 
+// ---- 退款：退一级，点数原样还回来，效果也跟着退 ----
+const rowBtn = (row, kind) => {
+  const bs = []
+  walk(document.body.children[document.body.children.length - 1], (n, par) => { if (n.tag === 'button') bs.push({ n, p: par }) })
+  return bs.find(x => rowText(x).indexOf(row) >= 0 && (kind === 'refund' ? /退款（/.test(x.n.textContent || '') : /升级（|已满级/.test(x.n.textContent || '')))
+}
+
+// 退常驻攻击的一级：3 级（+30%）→ 2 级（+20%）
+const atkBack = rowBtn('常驻攻击', 'refund')
+check('攻击那行有退款按钮', !!atkBack, JSON.stringify(rowBtn('常驻攻击', 'upgrade') && rowBtn('常驻攻击', 'upgrade').n.textContent))
+const ptsBefore = meta().points
+click(atkBack)
+check('退款把 120 点还回来了', meta().points === ptsBefore + 120, 'points=' + meta().points)
+check('退款后攻击回到 2 级', meta().lines.statAtk === 2, JSON.stringify(meta().lines))
+await sleep(400)
+check('能力值加成跟着退了（+20%）', hero.getStat(1) === 120, 'atk=' + hero.getStat(1))
+check('换的那只也跟着退', hero2.getStat(1) === 240, 'atk=' + hero2.getStat(1))
+check('面板上写了退款', (() => { let t = ''; walk(document.body.children[document.body.children.length - 1], n => { if (n.textContent) t += n.textContent + ' | ' }); return t.indexOf('已退款：') >= 0 })(), '')
+
+// 退局内运气的一级：1 级 → 0 级
+const luckBack = rowBtn('局内运气', 'refund')
+check('运气那行有退款按钮', !!luckBack, '')
+const ptsBefore2 = meta().points
+click(luckBack)
+check('运气退款把 150 点还回来了', meta().points === ptsBefore2 + 150, 'points=' + meta().points)
+check('运气回到 0 级', meta().lines.luck === 0, JSON.stringify(meta().lines))
+check('运气加成也没了', window.CoopMods.debug.battle.teamLuck().bonus === 0, JSON.stringify(window.CoopMods.debug.battle.teamLuck()))
+
+// 0 级的成长线没有退款按钮
+check('0 级那行没有退款按钮', !rowBtn('局内运气', 'refund'), '')
+// 退完还能再升回去
+click(rowBtn('局内运气', 'upgrade'))
+check('还能再升一级', meta().lines.luck === 1, JSON.stringify(meta().lines))
+check('点数又扣了 150', meta().points === ptsBefore2, 'points=' + meta().points)
+
 console.log(failed ? '\n有 ' + failed + ' 项没过' : '\n全部通过')
 process.exit(failed ? 1 : 0)

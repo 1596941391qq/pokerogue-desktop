@@ -118,11 +118,11 @@ CoopMods.define('trainer-growth', function (api) {
     title: '成长点',
     summary,
     lines: LINES.map(l => ({ id: l.id, name: l.name, max: l.max, cost: l.cost, desc: l.desc })),
-    onChange: (lineId, lv) => {
+    onChange: (lineId, lv, kind) => {
       // 效果都是用的时候现算的，这里只是在游戏里也提示一句（面板开着时在面板后面，关掉就能看到）
       try {
         const l = LINES.find(x => x.id === lineId);
-        if (l) api.battle.message('训练家提升：' + l.name + ' Lv' + lv);
+        if (l) api.battle.message('训练家提升：' + l.name + ' Lv' + lv + (kind === 'down' ? '（已退款）' : ''));
       } catch {}
     },
   });

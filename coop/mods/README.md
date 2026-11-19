@@ -52,7 +52,7 @@ CoopMods.define('my-mod', function (api) {
 | `api.mode()` | 现在是 `'solo'` 还是 `'coop'` |
 | `api.oncePerTurn(tag)` | 一回合里只问一次 |
 | `api.meta()` / `api.metaSave()` | **局外数据**（localStorage，关掉游戏还在） |
-| `api.metaPanel({...})` | 在 Mod 列表里画自己的面板（成长线、升级按钮）。参数：`{ title, summary(), lines: [{id,name,max,cost,desc(lv)}], onChange(id,lv) }`，`summary()` 是面板顶上那行「当前效果」 |
+| `api.metaPanel({...})` | 在 Mod 列表里画自己的面板（成长线、升级按钮）。参数：`{ title, summary(), lines: [{id,name,max,cost,desc(lv)}], onChange(id,lv,kind) }`，`summary()` 是面板顶上那行「当前效果」，`kind` 是 `'up'`（升级）或 `'down'`（退款） |
 | `api.rng(字符串)` | 种子随机数：同样的字符串总是同样的数 |
 | `api.log(...)` | 写进控制台（`COOP mods` 开头） |
 
@@ -74,6 +74,8 @@ CoopMods.define('my-mod', function (api) {
   - 成长线是**收起来**的：面板里只留「成长点：N 点」和「当前效果：」两行，点一下
     「展开成长线」才铺开全部成长线，再点一下收起。展开状态记在局外数据里（`meta.open`），
     下次打开面板还是原来那样。
+  - 每条成长线除了「升级」，还有「退款」：退一级，把当初升这一级花的点数原样还回来，
+    等级降了效果也跟着降（常驻能力值会在下一次重算时退回原数值）。
 
 扩展文件在 `coop/host-mods.js` 之后加载（`main.mjs` 的 `MOD_FILES`），所以引擎先起来，扩展再装钩子，
 mod 最后加载——mod 用到的钩子必须先由扩展 `X.addEvent()` 注册好。

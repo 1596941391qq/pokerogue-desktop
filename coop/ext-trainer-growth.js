@@ -91,15 +91,34 @@
             saveMeta(id);
             def.lastMsg = '刚升级：' + line.name + ' → Lv' + (lv + 1) + '/' + (line.max || 99);
             log('成长线 ' + line.id + ' → Lv' + (lv + 1));
-            if (def.onChange) X.guard('metaPanel onChange', () => def.onChange(line.id, lv + 1));
+            if (def.onChange) X.guard('metaPanel onChange', () => def.onChange(line.id, lv + 1, 'up'));
             render();
           },
         });
         if (!can) btn.setAttribute('disabled', 'disabled');
+        const opts = [btn];
+        // 退款：退一级，把当初升这一级花的点数原样还回来（等级降了，效果也就跟着降）
+        if (lv > 0) {
+          const back = costOf(line, lv - 1); // 从 lv-1 升到 lv 当时花的点数
+          opts.push(X.el('button', {
+            class: 'off',
+            text: '退款（+' + back + ' 点）',
+            onclick: () => {
+              if (lv <= 0) return;
+              m.points += back;
+              m.lines[line.id] = lv - 1;
+              saveMeta(id);
+              def.lastMsg = '已退款：' + line.name + ' → Lv' + (lv - 1) + '/' + (line.max || 99);
+              log('成长线 ' + line.id + ' 退了一级 → Lv' + (lv - 1));
+              if (def.onChange) X.guard('metaPanel onChange', () => def.onChange(line.id, lv - 1, 'down'));
+              render();
+            },
+          }));
+        }
         rows.push(X.el('div', { class: 'set' }, [
           X.el('div', { text: line.name + '  Lv' + lv + '/' + (line.max || 99) }),
           X.el('div', { class: 'meta', text: typeof line.desc === 'function' ? String(line.desc(lv)) : String(line.desc || '') }),
-          X.el('div', { class: 'opts' }, [btn]),
+          X.el('div', { class: 'opts' }, opts),
         ]));
       }
       return X.el('div', {}, rows);
@@ -111,7 +130,8 @@
       metaSave: () => saveMeta(mod.id),
       // 和引擎一样的种子随机数（同样的字符串总是同样的数）：mod 用来掷骰子
       rng: X.rng,
-      // 成长线面板：def = { title, summary(), lines: [{ id, name, max, cost, desc(lv) }], onChange(id, lv) }
+      // 成长线面板：def = { title, summary(), lines: [{ id, name, max, cost, desc(lv) }], onChange(id, lv, kind) }
+      // kind 是 'up'（升级了）或 'down'（退款了）
       metaPanel(def) {
         if (panels[mod.id]) throw new Error('metaPanel: one per mod');
         if (!def || !Array.isArray(def.lines)) throw new Error('metaPanel needs lines');
