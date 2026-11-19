@@ -1,9 +1,10 @@
-// 训练家提升（trainer-growth）0.3.0
+// 训练家提升（trainer-growth）0.4.0
 //
 // 规则：
 //   - 捕捉到一只宝可梦时给成长点。同一只只算第一次：这只在这台设备上已经算过点，就不再给。
 //   - 给多少点看稀有度：神话 > 传说 > 准神 > 初始宝可梦（游戏里选它要几个点）> 普通野外宝可梦。
 //   - 成长点是局外的（存在 localStorage，关掉游戏、换存档都还在），用来升级下面这些成长线。
+//   - 成长线的价格越升越贵（基础价 × 1.35^当前等级）：前期一两级很便宜，后面越来越贵。
 //   - 扭蛋机蛋的稀有度：每级让抽到的蛋有 12% 的概率升一档（普通→高级→超级→大师）。
 //   - 局内运气：每级给队伍 +1 点运气（游戏里的运气值 0..14），战后奖励更容易出好东西。
 //   - 常驻能力值：每级让玩家自己的每一只宝可梦的这项能力 +10%（像挥剑舞那样一直有效）：
@@ -57,6 +58,10 @@ CoopMods.define('trainer-growth', function (api) {
   const STAT_STEP = 0.10;  // 每级：这项能力 +10%（对玩家自己的每一只宝可梦）
   const STAT_MAX = 5;      // 每项能力最多几级（5 级 = +50%）
   const STAT_COST = 120;   // 能力值每级多少点
+  // 价格：越升越贵。基础价 × 1.35^当前等级，取整到 5 的倍数。
+  // 早期一两级很便宜（很快能尝到甜头），后面越来越贵，是真的要下决心。
+  const PRICE_STEP = 1.35;
+  const price = (base, lv) => Math.max(0, Math.round(base * Math.pow(PRICE_STEP, lv) / 5) * 5);
   // 能力值：key 是游戏里的名字（atk/def/spatk/spdef/spd），id 是成长线的名字
   const STATS = [
     { id: 'statAtk', key: 'atk', name: '攻击' },
@@ -67,23 +72,25 @@ CoopMods.define('trainer-growth', function (api) {
   ];
   const LINES = [
     {
-      id: 'gacha', name: '扭蛋机蛋的稀有度', max: 5, cost: 200,
+      id: 'gacha', name: '扭蛋机蛋的稀有度', max: 5, cost: lv => price(200, lv),
       desc: lv => '抽到的蛋有 ' + Math.round(GACHA_STEP * lv * 100) + '% 的概率升一档（普通→高级→超级→大师）。',
     },
     {
-      id: 'luck', name: '局内运气', max: 5, cost: 150,
+      id: 'luck', name: '局内运气', max: 5, cost: lv => price(150, lv),
       desc: lv => '队伍的运气 +' + lv + '（游戏里的运气值 0..14）。战后奖励更容易出好东西，野怪也更容易出稀有种。',
     },
     {
-      id: 'freeReroll', name: '免费刷新商店', max: 3, cost: 150,
+      // 2 次就够把战后奖励刷到想要的了，再多收益很小，所以上限压到 2 级、价格提到和别的一样
+      id: 'freeReroll', name: '免费刷新商店', max: 2, cost: lv => price(200, lv),
       desc: lv => '每场战斗结束后有 ' + lv + ' 次免费刷新（战后奖励界面左下角那个「刷新商店」）。',
     },
     {
-      id: 'rewardSlots', name: '战后奖励栏位', max: 5, cost: 120,
+      // 栏位是最值钱的一条（奖励池直接变大），所以不再是最便宜的那条
+      id: 'rewardSlots', name: '战后奖励栏位', max: 5, cost: lv => price(200, lv),
       desc: lv => '战后奖励的道具栏位 +' + lv + '（默认 3 个，可以挑的更多）。',
     },
   ].concat(STATS.map(s => ({
-    id: s.id, name: '常驻' + s.name, max: STAT_MAX, cost: STAT_COST,
+    id: s.id, name: '常驻' + s.name, max: STAT_MAX, cost: lv => price(STAT_COST, lv),
     desc: lv => '自己的每只宝可梦' + s.name + ' +' + Math.round(STAT_STEP * lv * 100) + '%（升级、进化、换宝可梦都还在，敌人不受影响）。',
   })));
   const level = id => {
@@ -110,9 +117,20 @@ CoopMods.define('trainer-growth', function (api) {
     return parts.length ? parts.join(' · ') : '还没有升级任何成长线';
   }
 
+  // 面板上再写一行：捕捉进度（图鉴一共有多少种是游戏自己的数据，这里现问）
+  function note() {
+    const n = Object.keys(M.caught || {}).length;
+    const total = api.dexTotal();
+    const head = total
+      ? '已捕捉 ' + n + ' / ' + total + ' 种（' + Math.round((n / total) * 100) + '%）'
+      : '已捕捉 ' + n + ' 种';
+    return head + ' · 累计 ' + Math.floor(M.total || 0) + ' 点';
+  }
+
   api.metaPanel({
     title: '成长点',
     summary,
+    note,
     lines: LINES.map(l => ({ id: l.id, name: l.name, max: l.max, cost: l.cost, desc: l.desc })),
     onChange: (lineId, lv, kind) => {
       // 效果都是用的时候现算的，这里只是在游戏里也提示一句（面板开着时在面板后面，关掉就能看到）

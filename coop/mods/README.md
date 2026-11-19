@@ -52,7 +52,7 @@ CoopMods.define('my-mod', function (api) {
 | `api.mode()` | 现在是 `'solo'` 还是 `'coop'` |
 | `api.oncePerTurn(tag)` | 一回合里只问一次 |
 | `api.meta()` / `api.metaSave()` | **局外数据**（localStorage，关掉游戏还在） |
-| `api.metaPanel({...})` | 在 Mod 列表里画自己的面板（成长线、升级按钮）。参数：`{ title, summary(), lines: [{id,name,max,cost,desc(lv)}], onChange(id,lv,kind) }`，`summary()` 是面板顶上那行「当前效果」，`kind` 是 `'up'`（升级）或 `'down'`（退款） |
+| `api.metaPanel({...})` | 在 Mod 列表里画自己的面板（成长线、升级/退款按钮）。参数：`{ title, summary(), note(), lines: [{id,name,max,cost,desc(lv)}], onChange(id,lv,kind) }`，`summary()` 是面板顶上那行「当前效果」，`note()` 是再多写一行，`kind` 是 `'up'`（升级）或 `'down'`（退款）。`cost` 可以写成函数 `cost(lv)`，lv 是当前等级，这样能做出「越升越贵」的价格 |
 | `api.rng(字符串)` | 种子随机数：同样的字符串总是同样的数 |
 | `api.log(...)` | 写进控制台（`COOP mods` 开头） |
 
@@ -70,12 +70,15 @@ CoopMods.define('my-mod', function (api) {
     （`bonus.atk = 0.1` 就是这只宝可梦的攻击 +10%）。游戏算完能力值之后才会加上去，
     所以是永久的：升级、进化、换宝可梦都还在。只有玩家自己的宝可梦算数，敌人不算。
   - `api.meta()` / `api.metaSave()` / `api.metaPanel()` / `api.rng()`
+  - `api.dexTotal()`：图鉴里一共有多少种（游戏自己的数据 `GameData.dexData`，拿不到就 0）
   - 面板上会多两行：顶上「当前效果：」（mod 给的 `summary()`）和「刚升级：xxx → Lv2」
   - 成长线是**收起来**的：面板里只留「成长点：N 点」和「当前效果：」两行，点一下
     「展开成长线」才铺开全部成长线，再点一下收起。展开状态记在局外数据里（`meta.open`），
     下次打开面板还是原来那样。
   - 每条成长线除了「升级」，还有「退款」：退一级，把当初升这一级花的点数原样还回来，
     等级降了效果也跟着降（常驻能力值会在下一次重算时退回原数值）。
+  - 价格是 `cost(lv)` 算出来的：训练家提升用的是「基础价 × 1.35^当前等级」，
+    所以第 1 级很便宜，后面越来越贵。
 
 扩展文件在 `coop/host-mods.js` 之后加载（`main.mjs` 的 `MOD_FILES`），所以引擎先起来，扩展再装钩子，
 mod 最后加载——mod 用到的钩子必须先由扩展 `X.addEvent()` 注册好。

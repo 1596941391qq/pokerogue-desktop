@@ -75,6 +75,11 @@
       }
       // 刚点了升级：告诉玩家升到了几级（面板会重画，这一行留在最上面）
       if (def.lastMsg) rows.push(X.el('div', { class: 'meta', text: def.lastMsg }));
+      // mod 自己想多写一行（比如「已捕捉多少种」）：note() 返回空字符串就不画
+      if (def.note) {
+        const nt = String(X.guard('metaPanel note', () => def.note(), '') || '');
+        if (nt) rows.push(X.el('div', { class: 'meta', text: nt }));
+      }
       // 收起来的时候下面什么都不画
       for (const line of expanded ? lines : []) {
         const lv = Math.max(0, Math.min(line.max || 99, Math.floor(Number(m.lines[line.id]) || 0)));
@@ -128,9 +133,20 @@
       // 局外数据（live 对象）：改了之后调 api.metaSave() 存起来
       meta: () => metaOf(mod.id),
       metaSave: () => saveMeta(mod.id),
+      // 图鉴里一共有多少种：游戏自己的数据（GameData.dexData 每个物种一条），拿不到就 0
+      dexTotal: () => {
+        try {
+          const gd = X.scene() && X.scene().gameData;
+          if (gd && gd.dexData) {
+            const n = Object.keys(gd.dexData).length;
+            if (n > 0) return n;
+          }
+        } catch {}
+        return 0;
+      },
       // 和引擎一样的种子随机数（同样的字符串总是同样的数）：mod 用来掷骰子
       rng: X.rng,
-      // 成长线面板：def = { title, summary(), lines: [{ id, name, max, cost, desc(lv) }], onChange(id, lv, kind) }
+      // 成长线面板：def = { title, summary(), note(), lines: [{ id, name, max, cost, desc(lv) }], onChange(id, lv, kind) }
       // kind 是 'up'（升级了）或 'down'（退款了）
       metaPanel(def) {
         if (panels[mod.id]) throw new Error('metaPanel: one per mod');

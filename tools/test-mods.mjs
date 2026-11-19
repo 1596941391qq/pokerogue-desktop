@@ -52,6 +52,8 @@ try { Object.defineProperty(globalThis, 'navigator', { value: { language: 'zh-CN
 
 // ---- 假游戏（游戏那边的接口：图鉴、初始宝可梦的点数、扭蛋机、蛋）----
 const dexData = {}
+// 假的图鉴：先塞 100 条进去（真的游戏里是 1084 种），好让「已捕捉 X / Y 种」有个分母
+for (let i = 0; i < 100; i++) dexData['dummy' + i] = { caughtAttr: 0n }
 const STARTER_COST = { 2: 1, 3: 4, 4: 8 }
 class GameData {
   constructor() { this.dexData = dexData; this.starterData = { 2: {}, 3: {}, 4: {} }; this.eggs = [] }
@@ -193,6 +195,24 @@ check('运气那行有按钮', !!luckBtn, JSON.stringify(buttons.map(b => rowTex
 check('扭蛋机那行有按钮', !!gachaBtn, JSON.stringify(buttons.map(b => rowText(b))))
 const allText = () => { let out = []; walk(panel, n => { if (n.textContent) out.push(n.textContent) }); return out.join(' | ') }
 check('面板上有当前效果的汇总', allText().indexOf('当前效果：') >= 0, allText())
+check('面板上有捕捉进度', allText().indexOf('已捕捉 5 / 105 种') >= 0, allText())
+check('面板上有累计点数', allText().indexOf('累计 280 点') >= 0, allText())
+
+// 价格：每条线第 1 级的价钱（越高级越贵，后面再查涨没涨）
+{
+  const bs = []
+  walk(document.body.children[document.body.children.length - 1], (n, par) => { if (n.tag === 'button') bs.push({ n, p: par }) })
+  const priceOf = name => {
+    const b = bs.find(x => rowText(x).indexOf(name) >= 0 && /升级（/.test(x.n.textContent || ''))
+    const m = b && (b.n.textContent.match(/升级（(\d+) 点/) || [])
+    return m ? Number(m[1]) : -1
+  }
+  check('局内运气第 1 级 150 点', priceOf('局内运气') === 150, String(priceOf('局内运气')))
+  check('扭蛋机第 1 级 200 点', priceOf('扭蛋机') === 200, String(priceOf('扭蛋机')))
+  check('免费刷新第 1 级 200 点', priceOf('免费刷新') === 200, String(priceOf('免费刷新')))
+  check('战后奖励栏位第 1 级 200 点', priceOf('战后奖励栏位') === 200, String(priceOf('战后奖励栏位')))
+  check('常驻能力第 1 级 120 点', priceOf('常驻攻击') === 120, String(priceOf('常驻攻击')))
+}
 
 // 升级「局内运气」（150 点）
 click(luckBtn)
@@ -258,10 +278,18 @@ const buttons4 = []
 walk(panel4, (n, p) => { if (n.tag === 'button') buttons4.push({ n, p }) })
 click(buttons4.find(b => rowText(b).indexOf('常驻攻击') >= 0))
 check('攻击升到 2 级', meta().lines.statAtk === 2, JSON.stringify(meta().lines))
+check('升过一级后价格涨到 220 点', (() => {
+  const bs = []
+  walk(document.body.children[document.body.children.length - 1], (n, par) => { if (n.tag === 'button') bs.push({ n, p: par }) })
+  const b = bs.find(x => rowText(x).indexOf('常驻攻击') >= 0 && /升级（/.test(x.n.textContent || ''))
+  return !!b && b.n.textContent.indexOf('升级（220 点）') >= 0
+})(), '')
 await sleep(400)
 check('攻击 +20%', hero.getStat(1) === 120, 'atk=' + hero.getStat(1))
 // 再攒点，升级到 3 级：+30%，剩下的点不够再升了
+// （价格越升越贵：第 2 级要 160 点、第 3 级要 220 点，所以得多抓一只才够）
 catchOne(9, { mythical: true })
+catchOne(14, { mythical: true })
 const buttons5 = [] // 升级后面板重画了，重新找一次按钮
 const findAtk = () => { buttons5.length = 0; walk(document.body.children[document.body.children.length - 1], (n, p) => { if (n.tag === 'button') buttons5.push({ n, p }) }); return buttons5.find(b => rowText(b).indexOf('常驻攻击') >= 0) }
 click(findAtk())
@@ -275,7 +303,7 @@ check('点不够升不了级', meta().lines.statAtk === 3, JSON.stringify(meta()
 // 攒点：4 只神话宝可梦 = 480 点
 catchOne(10, { mythical: true }); catchOne(11, { mythical: true })
 catchOne(12, { mythical: true }); catchOne(13, { mythical: true })
-check('攒到足够的点', meta().points === 530, 'points=' + meta().points)
+check('攒到足够的点', meta().points === 510, 'points=' + meta().points)
 
 // 打开面板，升级名字里带这个词的那一行
 const upgrade = name => {
@@ -331,7 +359,7 @@ const atkBack = rowBtn('常驻攻击', 'refund')
 check('攻击那行有退款按钮', !!atkBack, JSON.stringify(rowBtn('常驻攻击', 'upgrade') && rowBtn('常驻攻击', 'upgrade').n.textContent))
 const ptsBefore = meta().points
 click(atkBack)
-check('退款把 120 点还回来了', meta().points === ptsBefore + 120, 'points=' + meta().points)
+check('退款把 220 点还回来了（当初买 3 级花了 220）', meta().points === ptsBefore + 220, 'points=' + meta().points)
 check('退款后攻击回到 2 级', meta().lines.statAtk === 2, JSON.stringify(meta().lines))
 await sleep(400)
 check('能力值加成跟着退了（+20%）', hero.getStat(1) === 120, 'atk=' + hero.getStat(1))
