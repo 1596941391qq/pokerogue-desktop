@@ -58,10 +58,13 @@ const STARTER_COST = { 2: 1, 3: 4, 4: 8 }
 class GameData {
   constructor() { this.dexData = dexData; this.starterData = { 2: {}, 3: {}, 4: {} }; this.eggs = [] }
   getSpeciesStarterValue(id) { return STARTER_COST[id] || 0 }
+  // 和游戏一样（src/system/game-data.ts）：incrementCount=false 时只有根形态抓过才算数
   async setPokemonCaught(pokemon, incrementCount = true, fromEgg = false) {
     const id = pokemon.species.speciesId
+    const rootId = pokemon.species.getRootSpeciesId()
     dexData[id] = dexData[id] || { caughtAttr: 0n }
-    if (!incrementCount && !dexData[id].caughtAttr) return false
+    dexData[rootId] = dexData[rootId] || { caughtAttr: 0n }
+    if (!incrementCount && !dexData[rootId].caughtAttr) return false
     dexData[id].caughtAttr = 1n
     return true
   }
@@ -112,7 +115,12 @@ const fakeScene = {
   currentBattle: { waveIndex: 5 },
 }
 globalThis.PRS_SCENE = fakeScene
-const mkPokemon = (speciesId, extra = {}) => ({ species: { speciesId, name: '宝可梦' + speciesId, mythical: false, legendary: false, subLegendary: false, baseTotal: 500, ...extra } })
+const mkPokemon = (speciesId, extra = {}) => {
+  const species = { speciesId, name: '宝可梦' + speciesId, mythical: false, legendary: false, subLegendary: false, baseTotal: 500, ...extra }
+  // extra.rootId 可以指定「根形态」（进化前的那个），默认是自己
+  species.getRootSpeciesId = () => (extra.rootId != null ? extra.rootId : speciesId)
+  return { species }
+}
 const catchOne = (id, extra) => gd.setPokemonCaught(mkPokemon(id, extra), true, false)
 
 // ---- 加载（顺序和游戏里的一样：引擎 → 扩展 → mod）----
@@ -147,18 +155,18 @@ gacha.pullEggs(1)
 
 // 第一次捕捉
 catchOne(1, { mythical: true })
-check('第一次捕捉给点（神话 120）', meta().points === 120, 'points=' + meta().points)
-check('记下了这只', meta().caught['1'] === 120, JSON.stringify(meta().caught))
+check('第一次捕捉给点（神话 95）', meta().points === 95, 'points=' + meta().points)
+check('记下了这只', meta().caught['1'] === 95, JSON.stringify(meta().caught))
 catchOne(1, { mythical: true })
-check('重复捕捉不再给点', meta().points === 120, 'points=' + meta().points)
+check('重复捕捉不再给点', meta().points === 95, 'points=' + meta().points)
 catchOne(2, { legendary: true })
-check('传说 +80', meta().points === 200, 'points=' + meta().points)
+check('传说 +65', meta().points === 160, 'points=' + meta().points)
 catchOne(3, { subLegendary: true })
-check('准神 +40', meta().points === 240, 'points=' + meta().points)
+check('准神 +33', meta().points === 193, 'points=' + meta().points)
 catchOne(4, { starterCost: 8 })
-check('初始宝可梦（8 点）+30', meta().points === 270, 'points=' + meta().points)
+check('初始宝可梦（8 点）+25', meta().points === 218, 'points=' + meta().points)
 catchOne(5, { baseTotal: 700 })
-check('野外宝可梦 +10', meta().points === 280, 'points=' + meta().points)
+check('野外宝可梦 +9', meta().points === 227, 'points=' + meta().points)
 
 // 面板（真的打开一次）
 check('面板能打开', window.CoopMods.openPanel() === true)
@@ -196,7 +204,7 @@ check('扭蛋机那行有按钮', !!gachaBtn, JSON.stringify(buttons.map(b => ro
 const allText = () => { let out = []; walk(panel, n => { if (n.textContent) out.push(n.textContent) }); return out.join(' | ') }
 check('面板上有当前效果的汇总', allText().indexOf('当前效果：') >= 0, allText())
 check('面板上有捕捉进度', allText().indexOf('已捕捉 5 / 105 种') >= 0, allText())
-check('面板上有累计点数', allText().indexOf('累计 280 点') >= 0, allText())
+check('面板上有累计点数', allText().indexOf('累计 227 点') >= 0, allText())
 
 // 价格：每条线第 1 级的价钱（越高级越贵，后面再查涨没涨）
 {
@@ -207,16 +215,16 @@ check('面板上有累计点数', allText().indexOf('累计 280 点') >= 0, allT
     const m = b && (b.n.textContent.match(/升级（(\d+) 点/) || [])
     return m ? Number(m[1]) : -1
   }
-  check('局内运气第 1 级 150 点', priceOf('局内运气') === 150, String(priceOf('局内运气')))
-  check('扭蛋机第 1 级 200 点', priceOf('扭蛋机') === 200, String(priceOf('扭蛋机')))
-  check('免费刷新第 1 级 200 点', priceOf('免费刷新') === 200, String(priceOf('免费刷新')))
-  check('战后奖励栏位第 1 级 200 点', priceOf('战后奖励栏位') === 200, String(priceOf('战后奖励栏位')))
-  check('常驻能力第 1 级 120 点', priceOf('常驻攻击') === 120, String(priceOf('常驻攻击')))
+  check('局内运气第 1 级 120 点', priceOf('局内运气') === 120, String(priceOf('局内运气')))
+  check('扭蛋机第 1 级 150 点', priceOf('扭蛋机') === 150, String(priceOf('扭蛋机')))
+  check('免费刷新第 1 级 150 点', priceOf('免费刷新') === 150, String(priceOf('免费刷新')))
+  check('战后奖励栏位第 1 级 150 点', priceOf('战后奖励栏位') === 150, String(priceOf('战后奖励栏位')))
+  check('常驻能力第 1 级 90 点', priceOf('常驻攻击') === 90, String(priceOf('常驻攻击')))
 }
 
-// 升级「局内运气」（150 点）
+// 升级「局内运气」（120 点）
 click(luckBtn)
-check('升级扣了 150 点', meta().points === 130, 'points=' + meta().points)
+check('升级扣了 120 点', meta().points === 107, 'points=' + meta().points)
 check('运气升到 1 级', meta().lines.luck === 1, JSON.stringify(meta().lines))
 check('面板上写了刚升级了什么', allText().indexOf('刚升级：') >= 0, allText())
 check('游戏里也弹了一句', messages.some(t => /训练家提升/.test(t)), JSON.stringify(messages))
@@ -278,16 +286,16 @@ const buttons4 = []
 walk(panel4, (n, p) => { if (n.tag === 'button') buttons4.push({ n, p }) })
 click(buttons4.find(b => rowText(b).indexOf('常驻攻击') >= 0))
 check('攻击升到 2 级', meta().lines.statAtk === 2, JSON.stringify(meta().lines))
-check('升过一级后价格涨到 220 点', (() => {
+check('升过一级后价格涨到 165 点', (() => {
   const bs = []
   walk(document.body.children[document.body.children.length - 1], (n, par) => { if (n.tag === 'button') bs.push({ n, p: par }) })
   const b = bs.find(x => rowText(x).indexOf('常驻攻击') >= 0 && /升级（/.test(x.n.textContent || ''))
-  return !!b && b.n.textContent.indexOf('升级（220 点）') >= 0
+  return !!b && b.n.textContent.indexOf('升级（165 点）') >= 0
 })(), '')
 await sleep(400)
 check('攻击 +20%', hero.getStat(1) === 120, 'atk=' + hero.getStat(1))
 // 再攒点，升级到 3 级：+30%，剩下的点不够再升了
-// （价格越升越贵：第 2 级要 160 点、第 3 级要 220 点，所以得多抓一只才够）
+// （价格越升越贵：第 2 级要 120 点、第 3 级要 165 点，所以得多抓一只才够）
 catchOne(9, { mythical: true })
 catchOne(14, { mythical: true })
 const buttons5 = [] // 升级后面板重画了，重新找一次按钮
@@ -300,10 +308,10 @@ check('点不够时按钮是灰的', findAtk().n.attrs.disabled === 'disabled', 
 check('点不够升不了级', meta().lines.statAtk === 3, JSON.stringify(meta().lines))
 
 // ---- 免费刷新商店 / 战后奖励栏位 ----
-// 攒点：4 只神话宝可梦 = 480 点
+// 攒点：4 只神话宝可梦 = 380 点
 catchOne(10, { mythical: true }); catchOne(11, { mythical: true })
 catchOne(12, { mythical: true }); catchOne(13, { mythical: true })
-check('攒到足够的点', meta().points === 510, 'points=' + meta().points)
+check('攒到足够的点', meta().points === 437, 'points=' + meta().points)
 
 // 打开面板，升级名字里带这个词的那一行
 const upgrade = name => {
@@ -359,7 +367,7 @@ const atkBack = rowBtn('常驻攻击', 'refund')
 check('攻击那行有退款按钮', !!atkBack, JSON.stringify(rowBtn('常驻攻击', 'upgrade') && rowBtn('常驻攻击', 'upgrade').n.textContent))
 const ptsBefore = meta().points
 click(atkBack)
-check('退款把 220 点还回来了（当初买 3 级花了 220）', meta().points === ptsBefore + 220, 'points=' + meta().points)
+check('退款把 165 点还回来了（当初买 3 级花了 165）', meta().points === ptsBefore + 165, 'points=' + meta().points)
 check('退款后攻击回到 2 级', meta().lines.statAtk === 2, JSON.stringify(meta().lines))
 await sleep(400)
 check('能力值加成跟着退了（+20%）', hero.getStat(1) === 120, 'atk=' + hero.getStat(1))
@@ -371,7 +379,7 @@ const luckBack = rowBtn('局内运气', 'refund')
 check('运气那行有退款按钮', !!luckBack, '')
 const ptsBefore2 = meta().points
 click(luckBack)
-check('运气退款把 150 点还回来了', meta().points === ptsBefore2 + 150, 'points=' + meta().points)
+check('运气退款把 120 点还回来了', meta().points === ptsBefore2 + 120, 'points=' + meta().points)
 check('运气回到 0 级', meta().lines.luck === 0, JSON.stringify(meta().lines))
 check('运气加成也没了', window.CoopMods.debug.battle.teamLuck().bonus === 0, JSON.stringify(window.CoopMods.debug.battle.teamLuck()))
 
@@ -380,7 +388,42 @@ check('0 级那行没有退款按钮', !rowBtn('局内运气', 'refund'), '')
 // 退完还能再升回去
 click(rowBtn('局内运气', 'upgrade'))
 check('还能再升一级', meta().lines.luck === 1, JSON.stringify(meta().lines))
-check('点数又扣了 150', meta().points === ptsBefore2, 'points=' + meta().points)
+check('点数又扣了 120', meta().points === ptsBefore2, 'points=' + meta().points)
+
+// ---- 孵蛋 / 进化：也算「获得」，但同一种只算一次 ----
+// （放在最后：这一段只和「现在的点数」比，不会影响前面那些绝对值断言）
+const pts = () => meta().points
+
+// 孵蛋：这一种野外还没抓过
+const beforeEgg = pts()
+await gd.setPokemonCaught(mkPokemon(20, { mythical: true }), true, true)
+check('孵蛋也给点', pts() === beforeEgg + 95, 'points=' + pts())
+check('孵蛋的也记下了', meta().caught['20'] === 95, JSON.stringify(meta().caught))
+// 孵蛋之后再在野外抓到同一只
+await gd.setPokemonCaught(mkPokemon(20, { mythical: true }), true, false)
+check('孵蛋之后再野外抓到同一只不再给点', pts() === beforeEgg + 95, 'points=' + pts())
+// 同一只孵蛋两次
+await gd.setPokemonCaught(mkPokemon(20, { mythical: true }), true, true)
+check('同一只孵蛋两次只给一次点', pts() === beforeEgg + 95, 'points=' + pts())
+
+// 进化：根形态抓过了，进化出来的新形态给点
+await gd.setPokemonCaught(mkPokemon(21, { mythical: true }), true, false)
+const afterRoot = pts()
+await gd.setPokemonCaught(mkPokemon(22, { mythical: true, rootId: 21 }), false, false)
+check('进化出来的新形态也给点', pts() === afterRoot + 95, 'points=' + pts())
+
+// 租借：incrementCount=false，根形态还没抓过 → 游戏那边图鉴都不动，也不该给点
+const beforeRent = pts()
+await gd.setPokemonCaught(mkPokemon(23, { mythical: true }), false, false)
+check('租借来的宝可梦不给点', pts() === beforeRent, 'points=' + pts())
+
+// 图鉴里早就抓过（装这个 mod 之前抓的）也会给一次点，之后就不再给了
+dexData['30'] = { caughtAttr: 1n }
+const beforeOld = pts()
+await gd.setPokemonCaught(mkPokemon(30, { mythical: true }), true, false)
+check('图鉴里早就有的，第一次也会给点', pts() === beforeOld + 95, 'points=' + pts())
+await gd.setPokemonCaught(mkPokemon(30, { mythical: true }), true, false)
+check('之后就再也不给了', pts() === beforeOld + 95, 'points=' + pts())
 
 console.log(failed ? '\n有 ' + failed + ' 项没过' : '\n全部通过')
 process.exit(failed ? 1 : 0)

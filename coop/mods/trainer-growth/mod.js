@@ -1,8 +1,10 @@
-// 训练家提升（trainer-growth）0.4.0
+// 训练家提升（trainer-growth）0.5.0
 //
 // 规则：
-//   - 捕捉到一只宝可梦时给成长点。同一只只算第一次：这只在这台设备上已经算过点，就不再给。
+//   - 获得一只宝可梦时给成长点（野外捕捉、孵蛋、进化出来的新形态都算）。同一只只算第一次：
+//     这只在这台设备上已经算过点，就不再给。
 //   - 给多少点看稀有度：神话 > 传说 > 准神 > 初始宝可梦（游戏里选它要几个点）> 普通野外宝可梦。
+//     稀有度之间的差距比第一版小一些（神话是普通野外的 16 倍，原来是 20 倍）。
 //   - 成长点是局外的（存在 localStorage，关掉游戏、换存档都还在），用来升级下面这些成长线。
 //   - 成长线的价格越升越贵（基础价 × 1.35^当前等级）：前期一两级很便宜，后面越来越贵。
 //   - 扭蛋机蛋的稀有度：每级让抽到的蛋有 12% 的概率升一档（普通→高级→超级→大师）。
@@ -16,9 +18,9 @@ CoopMods.define('trainer-growth', function (api) {
 
   // ---- 稀有度 → 成长点 ----
   const POINTS = {
-    mythical: 120, legendary: 80, subLegendary: 40,
-    starterTop: 30, starterMid: 22, starterLow: 15, starterCheap: 10,
-    wildBig: 10, wild: 6,
+    mythical: 95, legendary: 65, subLegendary: 33,
+    starterTop: 25, starterMid: 19, starterLow: 13, starterCheap: 9,
+    wildBig: 9, wild: 6,
   };
   function pointsOf(r) {
     if (!r) return 0;
@@ -39,9 +41,13 @@ CoopMods.define('trainer-growth', function (api) {
     return '野外';
   }
 
-  // ---- 捕捉：第一次才算点 ----
+  // ---- 获得宝可梦：第一次才算点 ----
+  // 野外捕捉、孵蛋、进化出来的新形态都算「获得」（扩展照游戏自己的规矩判断）。
+  // 是不是第一次由这个 mod 自己记（局外数据里的 caught），不靠游戏的图鉴：
+  // 图鉴里早就有的（装这个 mod 之前抓的）也会给一次点，之后再抓同一只就不给了。
+  const HOW = { catch: '捕捉到', egg: '孵出了', evolution: '进化得到了' };
   api.on('pokemonCaught', ev => {
-    if (!ev || !ev.first) return;
+    if (!ev) return;
     const key = String(ev.speciesId);
     if (M.caught[key]) return; // 这台设备上已经算过这只了
     const points = pointsOf(ev.rarity);
@@ -50,14 +56,15 @@ CoopMods.define('trainer-growth', function (api) {
     M.points += points;
     M.total = (Number(M.total) || 0) + points;
     api.metaSave();
-    api.log('捕捉到 ' + ev.name + '（' + rarityName(ev.rarity) + '）：+' + points + ' 成长点，一共 ' + Math.floor(M.points) + ' 点');
+    const how = HOW[ev.kind] || '获得了';
+    api.log(how + ' ' + ev.name + '（' + rarityName(ev.rarity) + '）：+' + points + ' 成长点，一共 ' + Math.floor(M.points) + ' 点');
   });
 
   // ---- 成长线 ----
   const GACHA_STEP = 0.12; // 每级：蛋升一档的概率
   const STAT_STEP = 0.10;  // 每级：这项能力 +10%（对玩家自己的每一只宝可梦）
   const STAT_MAX = 5;      // 每项能力最多几级（5 级 = +50%）
-  const STAT_COST = 120;   // 能力值每级多少点
+  const STAT_COST = 90;    // 能力值每级多少点
   // 价格：越升越贵。基础价 × 1.35^当前等级，取整到 5 的倍数。
   // 早期一两级很便宜（很快能尝到甜头），后面越来越贵，是真的要下决心。
   const PRICE_STEP = 1.35;
@@ -72,21 +79,21 @@ CoopMods.define('trainer-growth', function (api) {
   ];
   const LINES = [
     {
-      id: 'gacha', name: '扭蛋机蛋的稀有度', max: 5, cost: lv => price(200, lv),
+      id: 'gacha', name: '扭蛋机蛋的稀有度', max: 5, cost: lv => price(150, lv),
       desc: lv => '抽到的蛋有 ' + Math.round(GACHA_STEP * lv * 100) + '% 的概率升一档（普通→高级→超级→大师）。',
     },
     {
-      id: 'luck', name: '局内运气', max: 5, cost: lv => price(150, lv),
+      id: 'luck', name: '局内运气', max: 5, cost: lv => price(120, lv),
       desc: lv => '队伍的运气 +' + lv + '（游戏里的运气值 0..14）。战后奖励更容易出好东西，野怪也更容易出稀有种。',
     },
     {
       // 2 次就够把战后奖励刷到想要的了，再多收益很小，所以上限压到 2 级、价格提到和别的一样
-      id: 'freeReroll', name: '免费刷新商店', max: 2, cost: lv => price(200, lv),
+      id: 'freeReroll', name: '免费刷新商店', max: 2, cost: lv => price(150, lv),
       desc: lv => '每场战斗结束后有 ' + lv + ' 次免费刷新（战后奖励界面左下角那个「刷新商店」）。',
     },
     {
       // 栏位是最值钱的一条（奖励池直接变大），所以不再是最便宜的那条
-      id: 'rewardSlots', name: '战后奖励栏位', max: 5, cost: lv => price(200, lv),
+      id: 'rewardSlots', name: '战后奖励栏位', max: 5, cost: lv => price(150, lv),
       desc: lv => '战后奖励的道具栏位 +' + lv + '（默认 3 个，可以挑的更多）。',
     },
   ].concat(STATS.map(s => ({

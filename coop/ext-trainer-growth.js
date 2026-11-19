@@ -20,7 +20,8 @@
     const GACHA_SOURCE = [0, 1, 2]; // EggSourceType: GACHA_MOVE / GACHA_LEGENDARY / GACHA_SHINY
 
     // ---- 事件 ----
-    X.addEvent('pokemonCaught'); // 捕捉到一只宝可梦（第一次才算）：{ speciesId, name, first, rarity }
+    X.addEvent('pokemonCaught'); // 获得一只宝可梦：{ speciesId, name, kind, first, rarity }
+                                // kind: 'catch' 野外捕捉 / 'egg' 孵蛋 / 'evolution' 进化
     X.addEvent('gachaEggTier');  // 扭蛋机抽到的蛋：{ tier, sourceType, n }，返回更高的 tier（0..3）就是升级
     X.addEvent('pokemonStatBonus'); // 常驻能力值加成：{ pokemon, bonus }，往 bonus 里写比例（0.1 = +10%）
 
@@ -162,11 +163,13 @@
       const speciesId = species.speciesId;
       let first = true;
       try { const entry = gd && gd.dexData ? gd.dexData[speciesId] : null; first = !(entry && entry.caughtAttr); } catch {}
-      let starterCost = 0; // 初始宝可梦在游戏里值几个点（1..8）：越贵越稀有
+      let starterCost = 0; // 初始宝可梦在游戏里值几个点（1..10）：越贵越稀有
       try {
+        // 第二个参数传 0：只看这只宝可梦「本来」值几个点，不算玩家用糖果降过的那部分，
+        // 否则越常用的初始宝可梦反而点越少。
         if (gd && gd.starterData && gd.starterData[speciesId] && typeof gd.getSpeciesStarterValue === 'function') {
-          const v = gd.getSpeciesStarterValue(speciesId);
-          if (Number.isFinite(v)) starterCost = v;
+          const v = gd.getSpeciesStarterValue(speciesId, 0);
+          if (Number.isFinite(v) && v > 0) starterCost = v;
         }
       } catch {}
       let baseTotal = 0;
@@ -187,10 +190,26 @@
       X.wrap(proto, 'setPokemonCaught', 'tg', orig => function (...args) {
         try {
           const pokemon = args[0], incrementCount = args[1], fromEgg = args[2];
-          // incrementCount=false 是形态变化之类，不算捕捉；fromEgg=true 是孵蛋，也不算
-          if (incrementCount !== false && !fromEgg) {
+          // 游戏自己的规矩（src/system/game-data.ts 的 setPokemonCaught）：
+          //   incrementCount=true  是真的「获得」：野外捕捉、孵蛋、神秘遭遇，游戏都会记图鉴；
+          //   incrementCount=false 是形态变化/进化，游戏只有在「根形态已经捕捉过」时才记图鉴，
+          //                       否则那只是租借/借用来的，图鉴不动。
+          // 所以这里照抄游戏的判断：算不算一次「获得」，和游戏自己记不记图鉴是一致的。
+          let kind = null;
+          if (incrementCount !== false) kind = fromEgg ? 'egg' : 'catch';
+          else {
+            let rootCaught = false;
+            try {
+              const rootId = pokemon.species.getRootSpeciesId();
+              const entry = this.dexData && this.dexData[rootId];
+              rootCaught = !!(entry && entry.caughtAttr);
+            } catch {}
+            if (rootCaught) kind = 'evolution'; // 进化出新形态
+          }
+          if (kind) {
             const info = rarityOf(this, pokemon);
-            if (info && info.first) {
+            if (info) {
+              info.kind = kind;
               for (const [m, fn] of X.listeners('pokemonCaught')) X.guard('pokemonCaught (' + (m && m.id) + ')', () => fn(info));
             }
           }
