@@ -568,5 +568,41 @@ check('之后就再也不给了', pts() === beforeOld + 95, 'points=' + pts())
   check('移开就关掉说明面板', tooltips.length === 0, JSON.stringify(tooltips))
 }
 
+// ---- 局内运气：上限 10 级 ----
+{
+  // 攒够点（神话宝可梦一只 95 点）
+  let guard = 0
+  while (meta().points < 7000 && guard++ < 300) catchOne(1000 + guard, { mythical: true })
+  window.CoopMods.openPanel()
+  if (!upgradeBtns().length) click(toggleBtn()) // 成长线是收着的就展开
+  const luckBtnIn = re => {
+    const bs = []
+    walk(document.body.children[document.body.children.length - 1], (n, par) => { if (n.tag === 'button') bs.push({ n, p: par }) })
+    return bs.find(x => rowText(x).indexOf('局内运气') >= 0 && re.test(x.n.textContent || ''))
+  }
+  const luckUpgrade = () => luckBtnIn(/升级（|已满级/)
+  // 前面的测试把运气升到过 1 级：先退款退回 0 级，从头升一遍
+  for (let i = 0; i < 12; i++) {
+    const back = luckBtnIn(/退款（/)
+    if (!back) break
+    click(back)
+  }
+  check('运气先退回 0 级', meta().lines.luck === 0, JSON.stringify(meta().lines))
+  const pointsBefore = meta().points
+  const prices = []
+  for (let i = 0; i < 10; i++) {
+    const b = luckUpgrade()
+    if (!b) break
+    prices.push((b.n.textContent.match(/升级（(\d+) 点/) || [])[1] || '满')
+    click(b)
+  }
+  check('运气能升到 10 级', meta().lines.luck === 10, JSON.stringify(meta().lines))
+  check('运气满级以后按钮写着已满级', /已满级/.test((luckUpgrade() || { n: {} }).n.textContent || ''), JSON.stringify((luckUpgrade() || { n: {} }).n.textContent))
+  check('运气 10 级是 +10 点运气', window.CoopMods.debug.battle.teamLuck().bonus === 10, JSON.stringify(window.CoopMods.debug.battle.teamLuck()))
+  check('运气各级价格 120/160/220/295/400/540/725/980/1325/1785', prices.join('/') === '120/160/220/295/400/540/725/980/1325/1785', prices.join('/'))
+  check('运气升满一共花了 6550 点', pointsBefore - meta().points === 6550, 'spent=' + (pointsBefore - meta().points))
+  check('面板上运气那行写着 Lv10/10', rowText(luckUpgrade()).indexOf('Lv10/10') >= 0, rowText(luckUpgrade()))
+}
+
 console.log(failed ? '\n有 ' + failed + ' 项没过' : '\n全部通过')
 process.exit(failed ? 1 : 0)
