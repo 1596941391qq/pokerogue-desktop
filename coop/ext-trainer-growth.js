@@ -4,6 +4,8 @@
 //      （src/system/game-data.ts）。第一次记下图鉴的那一次就是「第一次捕捉」。
 //   2. 扭蛋机的蛋：Egg.prototype.rollEggTier()（src/data/egg.ts）是抽蛋时定稀有度的地方。
 //      游戏的稀有度概率（src/data/balance/rates.ts）：普通 204/256、高级 44/256、超级 7/256、大师 1/256。
+//      蛋的名字是 Egg.prototype.getEggDescriptor()（扭蛋机结果页、背包里的蛋列表都用它）：
+//      被加成升过档的蛋，名字后面加个「+」，这样一眼能看出是哪几只。
 //   3. 常驻能力值：游戏算一只宝可梦的能力值只有一处 Pokemon.calculateStats()
 //      （src/field/pokemon.ts）：升级、进化、换算都会重算。加成加在重算之后，所以是「永久」的：
 //      宝可梦自己的数值变大，换宝可梦也照样有（每只自己的都吃到）。
@@ -18,11 +20,15 @@
     const log = (...a) => X.log('ext', ...a);
     const TIER_ZH = ['普通', '高级', '超级', '大师']; // EggTier: COMMON / RARE / EPIC / LEGENDARY
     const GACHA_SOURCE = [0, 1, 2]; // EggSourceType: GACHA_MOVE / GACHA_LEGENDARY / GACHA_SHINY
+    const EGG_MARK = '+'; // 蛋名后面的标记：这只蛋是被加成升过档的（游戏那个像素字体里有这个字）
 
     // ---- 事件 ----
     X.addEvent('pokemonCaught'); // 获得一只宝可梦：{ speciesId, name, kind, first, rarity }
                                 // kind: 'catch' 野外捕捉 / 'egg' 孵蛋 / 'evolution' 进化
     X.addEvent('gachaEggTier');  // 扭蛋机抽到的蛋：{ tier, sourceType, n }，返回更高的 tier（0..3）就是升级
+    X.addEvent('gachaEggBoosted'); // 蛋真的被升了一档：{ tier, newTier, sourceType, n, egg }
+    X.addEvent('gachaEggMark');    // 这只蛋要不要加标记：{ id, tier, boosted, egg }，返回 true 就加
+    X.addEvent('gachaPull');       // 扭蛋机要抽蛋了：{ count }（这一批几个蛋）
     X.addEvent('pokemonStatBonus'); // 常驻能力值加成：{ pokemon, bonus }，往 bonus 里写比例（0.1 = +10%）
 
     // ---- 局外数据：每个 mod 一份 ----
@@ -234,17 +240,42 @@
             const r = X.guard('gachaEggTier (' + (m && m.id) + ')', () => fn(ev));
             if (Number.isFinite(r) && r > best) best = Math.min(3, Math.floor(r));
           }
-          if (best !== tier) log('蛋升了一档：' + TIER_ZH[tier] + ' -> ' + TIER_ZH[best]);
+          if (best !== tier) {
+            // 记在这只蛋身上：等它的名字被画出来的时候，后面加个「+」
+            this.__tgBoosted = { from: tier, to: best };
+            log('蛋升了一档：' + TIER_ZH[tier] + ' -> ' + TIER_ZH[best]);
+            const bev = { tier, newTier: best, sourceType: this._sourceType, n: ev.n, egg: this };
+            for (const [m, fn] of X.listeners('gachaEggBoosted')) {
+              X.guard('gachaEggBoosted (' + (m && m.id) + ')', () => fn(bev));
+            }
+          }
           return best;
         } catch (e) { log('扭蛋机钩子出错：' + String((e && e.stack) || e).slice(0, 200)); }
         return tier;
+      });
+      // 蛋的名字：扭蛋机结果页和背包里的蛋列表都是用它画的。
+      // 被加成升过档的，后面加个「+」；问一遍开着 mod，它说自己认得这只蛋就标上
+      // （mod 把自己升过档的蛋的编号记下来了，所以重开游戏以后还标得出来）。
+      X.wrap(proto, 'getEggDescriptor', 'tg', orig => function (...args) {
+        const s = orig.apply(this, args);
+        try {
+          const ev = { id: this._id, tier: this._tier, boosted: !!this.__tgBoosted, egg: this };
+          let marked = ev.boosted;
+          for (const [m, fn] of X.listeners('gachaEggMark')) {
+            const r = X.guard('gachaEggMark (' + (m && m.id) + ')', () => fn(ev));
+            if (r === true) marked = true;
+          }
+          return marked ? s + EGG_MARK : s;
+        } catch (e) { log('蛋的标记出错：' + String((e && e.stack) || e).slice(0, 200)); }
+        return s;
       });
     }
     function findEgg(s) {
       const gd = s && s.gameData;
       const eggs = gd && gd.eggs;
-      if (eggs && eggs.length) { installEgg(Object.getPrototypeOf(eggs[0])); return; } // 玩家已经有蛋了
-      // 还没有蛋：先包住扭蛋机，等它抽出第一批蛋时就知道 Egg 这个类了（那一批还是原来的稀有度）
+      if (eggs && eggs.length) installEgg(Object.getPrototypeOf(eggs[0])); // 玩家已经有蛋了
+      // 扭蛋机：包住 pullEggs。抽之前先告诉 mod「这一批要抽几个」，
+      // 抽完第一批就知道游戏里「蛋」这个类了（那一批还是原来的稀有度）。
       const handlers = (s.ui && s.ui.handlers) || [];
       const h = handlers.find(x => x && x.constructor && x.constructor.name === 'EggGachaUiHandler');
       if (!h || h.__tgEggHooked) return;
@@ -252,6 +283,12 @@
       const orig = h.pullEggs;
       if (typeof orig !== 'function') return;
       h.pullEggs = function (...args) {
+        try {
+          const ev = { count: Number(args[0]) || 0 };
+          for (const [m, fn] of X.listeners('gachaPull')) {
+            X.guard('gachaPull (' + (m && m.id) + ')', () => fn(ev));
+          }
+        } catch {}
         const eggs = orig.apply(this, args);
         try { if (eggs && eggs[0]) installEgg(Object.getPrototypeOf(eggs[0])); } catch {}
         return eggs;

@@ -70,9 +70,16 @@ class GameData {
   }
 }
 class Egg {
-  constructor(tier = 0, sourceType = 0) { this._tier = tier; this._sourceType = sourceType }
-  rollEggTier() { return this._tier }
+  constructor(tier = 0, sourceType = 0) {
+    this._baseTier = tier
+    this._sourceType = sourceType
+    this._tier = this.rollEggTier() // 游戏里就是这样：蛋一创建就定稀有度（src/data/egg.ts）
+    this._id = ++Egg.seq // 编号在稀有度之后才有
+  }
+  rollEggTier() { return this._baseTier }
+  getEggDescriptor() { return ['普通蛋', '高级蛋', '超级蛋', '大师蛋'][this._tier] || '普通蛋' }
 }
+Egg.seq = 0
 class EggGachaUiHandler {
   constructor() { this.gachaCursor = 0 }
   pullEggs(n) { const eggs = []; for (let i = 0; i < n; i++) eggs.push(new Egg(0, 0)); return eggs }
@@ -227,7 +234,7 @@ click(luckBtn)
 check('升级扣了 120 点', meta().points === 107, 'points=' + meta().points)
 check('运气升到 1 级', meta().lines.luck === 1, JSON.stringify(meta().lines))
 check('面板上写了刚升级了什么', allText().indexOf('刚升级：') >= 0, allText())
-check('游戏里也弹了一句', messages.some(t => /训练家提升/.test(t)), JSON.stringify(messages))
+check('面板操作不再往游戏的消息栏里弹东西', !messages.some(t => /训练家提升/.test(t)), JSON.stringify(messages))
 const luck = window.CoopMods.debug.battle.teamLuck()
 check('队伍运气 +1', luck.bonus === 1, JSON.stringify(luck))
 
@@ -247,6 +254,29 @@ let up = 0
 for (let i = 0; i < 200; i++) if (new Egg(0, 0).rollEggTier() > 0) up++
 check('1 级时约 12% 的蛋升一档', up > 5 && up < 50, '升了 ' + up + '/200')
 check('不是扭蛋机的蛋不动', new Egg(0, 3).rollEggTier() === 0)
+
+// ---- 被加成升过档的蛋：名字后面带个「+」 ----
+let boostedEgg = null
+for (let i = 0; i < 40 && !boostedEgg; i++) {
+  for (const e of gacha.pullEggs(5)) {
+    if (/\+/.test(e.getEggDescriptor())) { boostedEgg = e; break }
+  }
+}
+check('被加成升档的蛋，名字后面有标记', !!boostedEgg, '200 个蛋里一个都没升（不该发生）')
+check('没升档的蛋没有标记', !/\+/.test(new Egg(0, 3).getEggDescriptor()), new Egg(0, 3).getEggDescriptor())
+// 重开游戏以后蛋是从存档里读回来的（没有「这一局升过档」的记号），
+// 但 mod 记住了它的编号，还是标得出来
+const reloaded = new Egg(0, 3)
+reloaded._id = boostedEgg && boostedEgg._id
+check('重开游戏后同一只蛋还是带标记', /\+/.test(reloaded.getEggDescriptor()), reloaded.getEggDescriptor())
+// 面板上写着扭蛋机的账
+window.CoopMods.openPanel()
+{
+  let t = ''
+  walk(document.body.children[document.body.children.length - 1], n => { if (n.textContent) t += n.textContent + ' | ' })
+  check('面板上写着上次扭蛋机的账', /上次扭蛋机 \d+ 个蛋里 \d+ 个被加成升档/.test(t), t)
+  check('面板上写着这一局一共抽了多少', t.indexOf('这一局共抽了') >= 0, t)
+}
 
 // ---- 常驻能力值 ----
 const hero = new FakePokemon(true, 100)    // 自己的宝可梦

@@ -1,4 +1,4 @@
-// 训练家提升（trainer-growth）0.5.0
+// 训练家提升（trainer-growth）0.6.0
 //
 // 规则：
 //   - 获得一只宝可梦时给成长点（野外捕捉、孵蛋、进化出来的新形态都算）。同一只只算第一次：
@@ -8,6 +8,7 @@
 //   - 成长点是局外的（存在 localStorage，关掉游戏、换存档都还在），用来升级下面这些成长线。
 //   - 成长线的价格越升越贵（基础价 × 1.35^当前等级）：前期一两级很便宜，后面越来越贵。
 //   - 扭蛋机蛋的稀有度：每级让抽到的蛋有 12% 的概率升一档（普通→高级→超级→大师）。
+//     被升过档的蛋，名字后面带个「+」（抽蛋结果页和背包里的蛋列表都能看到）。
 //   - 局内运气：每级给队伍 +1 点运气（游戏里的运气值 0..14），战后奖励更容易出好东西。
 //   - 常驻能力值：每级让玩家自己的每一只宝可梦的这项能力 +10%（像挥剑舞那样一直有效）：
 //     升级、进化、换宝可梦都还在，敌人的不受影响。
@@ -131,7 +132,18 @@ CoopMods.define('trainer-growth', function (api) {
     const head = total
       ? '已捕捉 ' + n + ' / ' + total + ' 种（' + Math.round((n / total) * 100) + '%）'
       : '已捕捉 ' + n + ' 种';
-    return head + ' · 累计 ' + Math.floor(M.total || 0) + ' 点';
+    let out = head + ' · 累计 ' + Math.floor(M.total || 0) + ' 点';
+    // 扭蛋机：上次抽了几个蛋、其中几个被我们的加成升了档
+    const st = api.runState();
+    const lastN = Number(st.gachaN) || 0;
+    if (lastN > 0) {
+      out += ' · 上次扭蛋机 ' + lastN + ' 个蛋里 ' + (Number(st.gachaUp) || 0) + ' 个被加成升档';
+    }
+    const allN = Number(st.gachaTotal) || 0;
+    if (allN > 0) {
+      out += '（这一局共抽了 ' + allN + ' 个，' + (Number(st.gachaTotalUp) || 0) + ' 个升了档）';
+    }
+    return out;
   }
 
   api.metaPanel({
@@ -139,13 +151,7 @@ CoopMods.define('trainer-growth', function (api) {
     summary,
     note,
     lines: LINES.map(l => ({ id: l.id, name: l.name, max: l.max, cost: l.cost, desc: l.desc })),
-    onChange: (lineId, lv, kind) => {
-      // 效果都是用的时候现算的，这里只是在游戏里也提示一句（面板开着时在面板后面，关掉就能看到）
-      try {
-        const l = LINES.find(x => x.id === lineId);
-        if (l) api.battle.message('训练家提升：' + l.name + ' Lv' + lv + (kind === 'down' ? '（已退款）' : ''));
-      } catch {}
-    },
+    // 升级/退款不再往游戏的消息栏里弹东西了：面板上已经写着「刚升级：xxx → Lv2」。
   });
 
   // ---- 效果 1：局内运气 ----
@@ -162,6 +168,37 @@ CoopMods.define('trainer-growth', function (api) {
     const p = GACHA_STEP * lv;
     const roll = api.rng('trainer-growth:gacha:' + ev.n + ':' + ev.tier)();
     return roll < p ? ev.tier + 1 : undefined;
+  });
+
+  // ---- 扭蛋机的账：抽了多少个蛋、其中几个被我们的加成升了档 ----
+  // 记在这一局的存档里（api.runState），面板上能看到。
+  const TIER_ZH = ['普通', '高级', '超级', '大师']; // 蛋的稀有度（EggTier）
+  api.on('gachaPull', ev => {
+    const st = api.runState();
+    const n = ev && ev.count > 0 ? Math.floor(ev.count) : 0;
+    st.gachaN = n;        // 上一批抽了几个
+    st.gachaUp = 0;       // 这一批里有几个被升了档
+    st.gachaTotal = (Number(st.gachaTotal) || 0) + n; // 这一局一共抽了几个
+  });
+  api.on('gachaEggBoosted', ev => {
+    if (!ev) return;
+    const st = api.runState();
+    st.gachaUp = (Number(st.gachaUp) || 0) + 1;
+    st.gachaTotalUp = (Number(st.gachaTotalUp) || 0) + 1;
+    api.log('扭蛋机：有一只蛋被加成升了一档（' + (TIER_ZH[ev.tier] || '?') + ' → ' + (TIER_ZH[ev.newTier] || '?') + '）');
+  });
+  // 蛋的名字后面要不要加个「+」：这一局被我们升过档的蛋，编号记下来，
+  // 这样重开游戏（蛋是从存档里读回来的）也还标得出来。
+  api.on('gachaEggMark', ev => {
+    if (!ev) return;
+    const st = api.runState();
+    if (!st.boostedEggs || typeof st.boostedEggs !== 'object') st.boostedEggs = {};
+    const key = ev.id == null ? '' : String(ev.id);
+    if (ev.boosted) {
+      if (key) st.boostedEggs[key] = 1;
+      return true; // 这只蛋刚被升了档：标上
+    }
+    return !!(key && st.boostedEggs[key]); // 存档里记着的：也标上
   });
 
   // ---- 效果 3：常驻能力值 ----
