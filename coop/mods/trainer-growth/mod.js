@@ -1,8 +1,10 @@
-// 训练家提升（trainer-growth）0.8.0
+// 训练家提升（trainer-growth）0.9.0
 //
 // 规则：
 //   - 获得一只宝可梦时给成长点（野外捕捉、孵蛋、进化出来的新形态都算）。同一只只算第一次：
 //     这只在这台设备上已经算过点，就不再给。
+//   - 图鉴越满，抓到的新宝可梦越值钱：图鉴每满 20%，倍率 +0.2（1.0 → 1.2 → 1.4 → 1.6），
+//     最后 20% 直接翻倍（2.0）。倍率按「抓这一只之前」的图鉴进度算。
 //   - 给多少点看稀有度：神话 > 传说 > 准神 > 初始宝可梦（游戏里选它要几个点）> 普通野外宝可梦。
 //     稀有度之间的差距比第一版小一些（神话是普通野外的 16 倍，原来是 20 倍）。
 //   - 成长点是局外的（存在 localStorage，关掉游戏、换存档都还在），用来升级下面这些成长线。
@@ -43,6 +45,20 @@ CoopMods.define('trainer-growth', function (api) {
     return '野外';
   }
 
+  // ---- 图鉴越全，越值钱 ----
+  // 图鉴进度（游戏自己记的「抓到过多少种」）每过一档，倍率往上跳一档。
+  // 最后 20% 直接翻倍：越接近收尾，最后那几只越值钱。
+  const MULT_STEPS = [[0.2, 1.2], [0.4, 1.4], [0.6, 1.6], [0.8, 2.0]];
+  function multOf(progress) {
+    let m = 1;
+    for (const [t, v] of MULT_STEPS) if (progress >= t) m = v;
+    return m;
+  }
+  function dexInfo() {
+    const d = api.dexProgress();
+    return { caught: d.caught, total: d.total, pct: Math.round(d.progress * 100), mult: multOf(d.progress), multText: multOf(d.progress).toFixed(1) };
+  }
+
   // ---- 获得宝可梦：第一次才算点 ----
   // 野外捕捉、孵蛋、进化出来的新形态都算「获得」（扩展照游戏自己的规矩判断）。
   // 是不是第一次由这个 mod 自己记（局外数据里的 caught），不靠游戏的图鉴：
@@ -52,14 +68,17 @@ CoopMods.define('trainer-growth', function (api) {
     if (!ev) return;
     const key = String(ev.speciesId);
     if (M.caught[key]) return; // 这台设备上已经算过这只了
-    const points = pointsOf(ev.rarity);
-    if (!(points > 0)) return;
+    const base = pointsOf(ev.rarity);
+    if (!(base > 0)) return;
+    const mult = multOf(api.dexProgress().progress); // 图鉴越满，这一只是不是更值钱
+    const points = Math.round(base * mult);
     M.caught[key] = points;
     M.points += points;
     M.total = (Number(M.total) || 0) + points;
     api.metaSave();
     const how = HOW[ev.kind] || '获得了';
-    api.log(how + ' ' + ev.name + '（' + rarityName(ev.rarity) + '）：+' + points + ' 成长点，一共 ' + Math.floor(M.points) + ' 点');
+    api.log(how + ' ' + ev.name + '（' + rarityName(ev.rarity) + '）：+' + points + ' 成长点' +
+      (mult > 1 ? '（×' + mult.toFixed(1) + '）' : '') + '，一共 ' + Math.floor(M.points) + ' 点');
   });
 
   // ---- 成长线 ----
@@ -139,8 +158,8 @@ CoopMods.define('trainer-growth', function (api) {
       out.push((l.short || l.name) + ' Lv' + lv + '：' + (typeof l.brief === 'function' ? l.brief(lv) : ''));
     }
     if (!out.length) out.push('还没有升级任何成长线。');
-    const n = Object.keys(M.caught || {}).length;
-    out.push('成长点 ' + Math.floor(M.points) + ' · 已捕捉 ' + n + ' 种');
+    const d = dexInfo();
+    out.push('成长点 ' + Math.floor(M.points) + ' · 图鉴 ' + d.pct + '% · 倍率 ×' + d.multText);
     return out.join('\n');
   });
 
@@ -165,9 +184,9 @@ CoopMods.define('trainer-growth', function (api) {
   // 面板上再写一行：捕捉进度（图鉴一共有多少种是游戏自己的数据，这里现问）
   function note() {
     const n = Object.keys(M.caught || {}).length;
-    const total = api.dexTotal();
-    const head = total
-      ? '已捕捉 ' + n + ' / ' + total + ' 种（' + Math.round((n / total) * 100) + '%）'
+    const d = dexInfo();
+    const head = d.total
+      ? '已捕捉 ' + d.caught + ' / ' + d.total + ' 种（' + d.pct + '%）· 现在的倍率 ×' + d.multText
       : '已捕捉 ' + n + ' 种';
     let out = head + ' · 累计 ' + Math.floor(M.total || 0) + ' 点';
     // 扭蛋机：上次抽了几个蛋、其中几个被我们的加成升了档

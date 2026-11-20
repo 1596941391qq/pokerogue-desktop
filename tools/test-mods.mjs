@@ -568,6 +568,43 @@ check('之后就再也不给了', pts() === beforeOld + 95, 'points=' + pts())
   check('移开就关掉说明面板', tooltips.length === 0, JSON.stringify(tooltips))
 }
 
+// ---- 图鉴越满，抓到的新宝可梦越值钱 ----
+{
+  const dexState = () => {
+    const keys = Object.keys(dexData)
+    const caught = keys.filter(k => dexData[k] && dexData[k].caughtAttr).length
+    return { caught, total: keys.length, p: keys.length ? caught / keys.length : 0 }
+  }
+  const multAt = p => { let m = 1; for (const [t, v] of [[0.2, 1.2], [0.4, 1.4], [0.6, 1.6], [0.8, 2.0]]) if (p >= t) m = v; return m }
+  // 图鉴还很空：没有倍率
+  const st1 = dexState()
+  check('图鉴还不到 20% 时倍率是 ×1', multAt(st1.p) === 1, JSON.stringify(st1))
+  const b1 = meta().points
+  catchOne(41, { mythical: true })
+  check('空图鉴时按原点数给（95 点）', meta().points - b1 === 95, 'got=' + (meta().points - b1))
+  // 把图鉴填到一半左右（40%~60% 那一档）
+  let guard = 0
+  while (dexState().p < 0.5 && guard++ < 200) { const k = 'dummy' + guard; if (dexData[k]) dexData[k].caughtAttr = 1n }
+  const st2 = dexState()
+  const m2 = multAt(st2.p)
+  check('图鉴过了 40% 以后倍率是 ×1.4', m2 === 1.4, JSON.stringify(st2))
+  const b2 = meta().points
+  const logs = []
+  const realLog = console.log
+  console.log = (...a) => { logs.push(a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ')); realLog(...a) }
+  catchOne(42, { mythical: true })
+  console.log = realLog
+  check('这一只按倍率给点（95 × 1.4）', meta().points - b2 === Math.round(95 * 1.4), 'got=' + (meta().points - b2))
+  check('消息里写着这次的倍率', logs.some(t => /×1\.4/.test(t)), JSON.stringify(logs))
+  // 面板和说明面板上都要写现在的倍率
+  window.CoopMods.openPanel()
+  const noteText = (() => { let t = ''; walk(document.body, n => { if (n.textContent) t += n.textContent + ' | ' }); return t })()
+  check('面板上写着现在的倍率', /现在的倍率 ×1\.4/.test(noteText), noteText.slice(0, 200))
+  const tipText = window.CoopMods.debug.tgItemInfo()
+  check('说明面板上写着倍率', /倍率 ×1\.4/.test(tipText), JSON.stringify(tipText))
+  check('说明面板上写着图鉴百分比', /图鉴 \d+%/.test(tipText), JSON.stringify(tipText))
+}
+
 // ---- 局内运气：上限 10 级 ----
 {
   // 攒够点（神话宝可梦一只 95 点）

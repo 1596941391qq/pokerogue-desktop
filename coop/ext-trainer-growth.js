@@ -154,6 +154,25 @@
         } catch {}
         return 0;
       },
+      // 图鉴进度：游戏自己记的「抓到过多少种 / 图鉴一共多少种」。
+      // mod 用它算「图鉴越全，抓到的新宝可梦越值钱」的倍率。
+      dexProgress: () => {
+        let caught = 0, total = 0;
+        try {
+          const gd = X.scene() && X.scene().gameData;
+          if (gd) {
+            if (gd.dexData) total = Object.keys(gd.dexData).length;
+            if (typeof gd.getSpeciesCount === 'function') {
+              // 游戏统计页数「抓到多少种」用的就是这个（src/system/game-data.ts）
+              caught = gd.getSpeciesCount(d => !!(d && d.caughtAttr)) || 0;
+            } else if (gd.dexData) {
+              caught = Object.keys(gd.dexData).filter(k => gd.dexData[k] && gd.dexData[k].caughtAttr).length;
+            }
+          }
+        } catch {}
+        const progress = total > 0 ? Math.max(0, Math.min(1, caught / total)) : 0;
+        return { caught, total, progress };
+      },
       // 和引擎一样的种子随机数（同样的字符串总是同样的数）：mod 用来掷骰子
       rng: X.rng,
       // 成长线面板：def = { title, summary(), note(), lines: [{ id, name, max, cost, desc(lv) }], onChange(id, lv, kind) }
