@@ -368,24 +368,8 @@
       return '';
     }
 
-    // 说明面板固定在右上角：游戏默认是跟着鼠标走的（手机上自己在右上角），
-    // 这里两种都统一到右上角，点哪儿都是同一个位置。
-    function pinTip(s) {
-      const ui = s.ui;
-      if (!ui || ui.__tgTipPinned || typeof ui.update !== 'function') return;
-      ui.__tgTipPinned = true;
-      const orig = ui.update;
-      ui.update = function (...args) {
-        const r = orig.apply(this, args);
-        try {
-          if (itemView.tip && this.tooltipContainer && this.tooltipContainer.visible && this.tooltipBg) {
-            const cw = this.scene && this.scene.scaledCanvas ? this.scene.scaledCanvas.width : 320;
-            this.tooltipContainer.setPosition(cw - this.tooltipBg.width - 2, 2);
-          }
-        } catch (e) { log('说明面板挪位置出错：' + String((e && e.stack) || e).slice(0, 120)); }
-        return r;
-      };
-    }
+    // 说明面板：完全用游戏自己那一套（同样的位置规则、同样的显示/隐藏），
+    // 别的道具指上去是什么样，这个就是什么样。
     function showItemInfo(s) {
       const ui = s.ui;
       if (!ui || typeof ui.showTooltip !== 'function') return;
@@ -393,11 +377,18 @@
       const text = itemText();
       itemView.tip = true;
       try { ui.showTooltip(it ? it.name : '训练家提升', text || '（还没有内容）'); } catch (e) { log('说明面板打不开：' + String((e && e.stack) || e).slice(0, 120)); }
-      pinTip(s);
     }
     function hideItemInfo(s) {
       itemView.tip = false;
       try { if (s.ui && typeof s.ui.hideTooltip === 'function') s.ui.hideTooltip(); } catch {}
+    }
+    // 鼠标还指着这个图标吗（图标被游戏重建以后，指针不会自己再触发一次 pointerover）
+    function pointerOn(s, icon) {
+      try {
+        const p = s.input && s.input.activePointer;
+        if (!p || typeof s.input.hitTestPointer !== 'function') return false;
+        return s.input.hitTestPointer(p, icon).length > 0;
+      } catch { return false; }
     }
 
     function drawItem(s) {
@@ -411,10 +402,14 @@
       if (!bar || !on) {
         if (itemView.icon) { try { itemView.icon.destroy(); } catch {} }
         itemView.icon = null;
+        itemView.sprite = null;
+        hideItemInfo(s); // 面板别留在屏幕上
         return;
       }
       // 游戏每次刷新道具栏都会把里面的图标全清掉重建，我们的也得跟着重建
-      if (!itemView.icon || !itemView.icon.scene || bar.list.indexOf(itemView.icon) < 0) {
+      const rebuilt = !itemView.icon || !itemView.icon.scene || bar.list.indexOf(itemView.icon) < 0;
+      const wasTip = itemView.tip; // 销毁图标不会触发 pointerout，面板得自己收拾
+      if (rebuilt) {
         const c = new Phaser.GameObjects.Container(s, 0, 0);
         const sp = new Phaser.GameObjects.Sprite(s, 0, 12, 'items', X.frameOf(ITEM_KEY));
         sp.setOrigin(0, 0.5);
@@ -439,6 +434,11 @@
       const rowIcons = 12 + 6 * Math.max(Math.ceil(Math.min(count, 24) / 12) - 2, 0);
       itemView.icon.setPosition((idx % rowIcons) * 26 / (rowIcons / 12), Math.floor(idx / rowIcons) * 20);
       itemView.icon.setVisible(true);
+      // 刚重建过：说明面板得自己收拾一下（图标被销毁时不会触发 pointerout）
+      if (rebuilt && wasTip) {
+        if (pointerOn(s, itemView.icon)) showItemInfo(s); // 鼠标还指着它：面板留着
+        else hideItemInfo(s); // 已经不在上面了：面板关掉
+      }
       // 道具一直在队伍背包里：这样它就是一个真的道具（面板里能看到，也就不会被当成随机奖励发出去）
       try { if (X.count(null, ITEM_KEY) < 1) X.give(null, ITEM_KEY, {}, 'mod'); } catch {}
     }
