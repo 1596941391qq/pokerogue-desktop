@@ -13,6 +13,7 @@
 | `prsYYMMDD-portable.exe` | Windows 玩家，双击就能玩。每次启动要先解压，慢一点 |
 | `prsYYMMDD-pc.zip` | Windows 玩家，电脑性能一般的推荐用这个。解压后双击「启动游戏.exe」 |
 | `prsYYMMDD-mac-arm64.dmg` | M 芯片的 Mac（M1 及以后） |
+| `prsYYMMDD-android.apk` | 安卓手机（Android 7.0 以上） |
 
 GitHub 下载慢或打不开的话，用**夸克网盘**（国内下载快）：<https://pan.quark.cn/s/365049b0755c>。里面放 Windows 压缩包（`pc.zip`）和安卓 APK，Mac 版只在 GitHub。
 
@@ -73,6 +74,22 @@ npm start                 # 本机运行
 npm run dist:win          # 出 Windows 便携版 exe + zip
 npm run dist:mac          # 出 Mac dmg
 ```
+
+### 打安卓 APK
+
+手机版壳在 [pokerogue-ios-android](https://github.com/1596941391qq/pokerogue-ios-android) 仓库里（安卓那个 app 模块），游戏内容就是 `app/src/main/assets/web/`。
+这个仓库的做法和 iOS 那套一样：拿上游编好的壳，把里面的 `assets/web/` 换成自己的（游戏 + 合作脚本 + 本地 mod），再重签一次。
+
+```bash
+node tools/build-android-apk.mjs              # 出 release/prs1.12.2.8-android.apk
+node tools/build-android-apk.mjs --proxy http://127.0.0.1:7897   # 走代理下载上游壳
+node tools/test-apk-sign.mjs                  # 验一下手写的签名实现
+```
+
+- 第一次跑会下上游那个安卓壳（535MB，8 段并行下），下过就复用 `/tmp/prs-android-build/shell.apk`。
+- 本机没装 JDK / apksigner，所以 v2 签名是 `tools/apk.mjs` 手写的：证书用系统自带的 `openssl` 生成，签名块按 AOSP apksig 的规范拼。摘要方案、结构、签名内容都拿上游官方签过的 APK 反推核对过，`tools/test-apk-sign.mjs` 会同时验「上游的签名能验过」和「自己签的能验过、改一个字节就失效」。
+- 签名用的密钥在 `~/.pokerogue-mod-signing/`，删了会换一把新密钥（换了密钥的新包没法覆盖安装旧包）。
+- 出来的包是 **v2 签名**（minSdk 24 / Android 7.0 以上都认）。上游官方那个安卓包用的是同一套签名方式，所以哪台手机能装上游的包，这台就能装我们这个。
 
 更新游戏版本：先在手机版仓库同步官方新版本，再把那边的提交号写进 `game-version.json` 的 `sourceRef`。推送 `pokerogue日期` 格式的标签，GitHub Actions 会自动打包并上传到同名 Release。
 

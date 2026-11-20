@@ -14,7 +14,9 @@
     "prestart": "node tools/build-mods.mjs",
     "start": "electron .",
     "dist:win": "electron-builder --win portable zip --x64 --publish never",
-    "dist:mac": "electron-builder --mac dmg --arm64 --publish never"
+    "dist:mac": "electron-builder --mac dmg --arm64 --publish never",
+    "build:android": "node tools/build-android-apk.mjs",
+    "test:apk": "node tools/test-apk-sign.mjs"
   },
   "devDependencies": {
     "electron": "44.10.2",
