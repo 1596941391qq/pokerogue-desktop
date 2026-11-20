@@ -1,4 +1,4 @@
-// 训练家提升（trainer-growth）0.6.0
+// 训练家提升（trainer-growth）0.7.0
 //
 // 规则：
 //   - 获得一只宝可梦时给成长点（野外捕捉、孵蛋、进化出来的新形态都算）。同一只只算第一次：
@@ -14,6 +14,7 @@
 //     升级、进化、换宝可梦都还在，敌人的不受影响。
 //   - 免费刷新商店：每级让每场战斗结束后有 1 次免费刷新（游戏里那个「刷新商店」按钮）。
 //   - 战后奖励栏位：每级让战后奖励的道具栏位 +1（默认 3 个）。
+//   - 道具：左上角道具栏里的「训练家提升」道具，指一下就在右上角写着现在各项加了多少。
 CoopMods.define('trainer-growth', function (api) {
   const M = api.meta(); // 局外数据：{ points, lines: {}, caught: {} }
 
@@ -72,40 +73,74 @@ CoopMods.define('trainer-growth', function (api) {
   const price = (base, lv) => Math.max(0, Math.round(base * Math.pow(PRICE_STEP, lv) / 5) * 5);
   // 能力值：key 是游戏里的名字（atk/def/spatk/spdef/spd），id 是成长线的名字
   const STATS = [
-    { id: 'statAtk', key: 'atk', name: '攻击' },
-    { id: 'statDef', key: 'def', name: '防御' },
-    { id: 'statSpAtk', key: 'spatk', name: '特攻' },
-    { id: 'statSpDef', key: 'spdef', name: '特防' },
-    { id: 'statSpd', key: 'spd', name: '速度' },
+    { id: 'statAtk', key: 'atk', name: '攻击', short: '攻' },
+    { id: 'statDef', key: 'def', name: '防御', short: '防' },
+    { id: 'statSpAtk', key: 'spatk', name: '特攻', short: '特攻' },
+    { id: 'statSpDef', key: 'spdef', name: '特防', short: '特防' },
+    { id: 'statSpd', key: 'spd', name: '速度', short: '速' },
   ];
   const LINES = [
     {
-      id: 'gacha', name: '扭蛋机蛋的稀有度', max: 5, cost: lv => price(150, lv),
+      id: 'gacha', name: '扭蛋机蛋的稀有度', short: '蛋的稀有度', max: 5, cost: lv => price(150, lv),
       desc: lv => '抽到的蛋有 ' + Math.round(GACHA_STEP * lv * 100) + '% 的概率升一档（普通→高级→超级→大师）。',
+      brief: lv => '升档 +' + Math.round(GACHA_STEP * lv * 100) + '%',
     },
     {
-      id: 'luck', name: '局内运气', max: 5, cost: lv => price(120, lv),
+      id: 'luck', name: '局内运气', short: '运气', max: 5, cost: lv => price(120, lv),
       desc: lv => '队伍的运气 +' + lv + '（游戏里的运气值 0..14）。战后奖励更容易出好东西，野怪也更容易出稀有种。',
+      brief: lv => '+' + lv,
     },
     {
       // 2 次就够把战后奖励刷到想要的了，再多收益很小，所以上限压到 2 级、价格提到和别的一样
-      id: 'freeReroll', name: '免费刷新商店', max: 2, cost: lv => price(150, lv),
+      id: 'freeReroll', name: '免费刷新商店', short: '免费刷新', max: 2, cost: lv => price(150, lv),
       desc: lv => '每场战斗结束后有 ' + lv + ' 次免费刷新（战后奖励界面左下角那个「刷新商店」）。',
+      brief: lv => '每场 ×' + lv,
     },
     {
       // 栏位是最值钱的一条（奖励池直接变大），所以不再是最便宜的那条
-      id: 'rewardSlots', name: '战后奖励栏位', max: 5, cost: lv => price(150, lv),
+      id: 'rewardSlots', name: '战后奖励栏位', short: '奖励栏位', max: 5, cost: lv => price(150, lv),
       desc: lv => '战后奖励的道具栏位 +' + lv + '（默认 3 个，可以挑的更多）。',
+      brief: lv => '+' + lv + ' 个',
     },
   ].concat(STATS.map(s => ({
-    id: s.id, name: '常驻' + s.name, max: STAT_MAX, cost: lv => price(STAT_COST, lv),
+    id: s.id, name: '常驻' + s.name, short: '常驻' + s.name, max: STAT_MAX, cost: lv => price(STAT_COST, lv),
     desc: lv => '自己的每只宝可梦' + s.name + ' +' + Math.round(STAT_STEP * lv * 100) + '%（升级、进化、换宝可梦都还在，敌人不受影响）。',
+    brief: lv => '+' + Math.round(STAT_STEP * lv * 100) + '%',
   })));
   const level = id => {
     const l = LINES.find(x => x.id === id);
     if (!l) return 0;
     return Math.max(0, Math.min(l.max, Math.floor(Number(M.lines[id]) || 0)));
   };
+
+  // ---- 道具：训练家提升 ----
+  // 一个真的道具（被动增益，图标是自己画的 32x32 像素画）：
+  // 它会像游戏自己的道具一样出现在左上角的道具栏里，指上去/点一下，右上角就出现说明，
+  // 里面写着现在各项成长线加了多少（游戏自己的道具说明面板，和别的道具一模一样）。
+  api.item({
+    id: 'boost',
+    name: '训练家提升',
+    description: '把捕捉宝可梦攒下来的成长点变成永久加成：扭蛋机抽蛋的稀有度、局内运气、每场战斗的免费刷新、战后奖励的栏位，还有常驻的攻击/防御/特攻/特防/速度。说明里写着现在每一项加了多少。',
+    tier: 'COMMON',
+    weight: 0, // 一直待在队伍背包里，不作为随机奖励出现
+    kind: 'passive',
+    max: 1,
+    icon: 'boost',
+  });
+
+  // 道具说明面板里写什么（这个 mod 最清楚自己每条成长线是什么）
+  api.on('itemInfo', () => {
+    const out = [];
+    for (const l of LINES) {
+      const lv = level(l.id);
+      if (lv <= 0) continue;
+      out.push((l.short || l.name) + ' Lv' + lv + '：' + (typeof l.brief === 'function' ? l.brief(lv) : ''));
+    }
+    if (!out.length) out.push('还没有升级任何成长线。');
+    const n = Object.keys(M.caught || {}).length;
+    out.push('成长点 ' + Math.floor(M.points) + ' · 已捕捉 ' + n + ' 种');
+    return out.join('\n');
+  });
 
   // 面板顶上那一行：现在这些成长线加在一起是什么效果
   function summary() {

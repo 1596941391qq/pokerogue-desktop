@@ -40,12 +40,19 @@ function fakeEl(tag) {
 }
 globalThis.document = {
   createElement: fakeEl,
+  createTextNode: text => ({ nodeType: 3, textContent: String(text), children: [] }),
   head: { children: [], appendChild(c) { this.children.push(c); return c } },
   body: { children: [], appendChild(c) { this.children.push(c); return c } },
   getElementById: id => created.find(e => e.id === id) || null,
   addEventListener: noop,
 }
 globalThis.window = globalThis
+// 假 Image：mod 的图标是打包成 data URI 的 PNG，引擎要拿 Image 解码一下
+globalThis.Image = class {
+  constructor() { this.width = 32; this.height = 32; this.onload = null; this.onerror = null }
+  set src(v) { this._src = v; if (this.onload) this.onload() }
+  get src() { return this._src }
+}
 globalThis.addEventListener = noop
 globalThis.removeEventListener = noop
 try { Object.defineProperty(globalThis, 'navigator', { value: { language: 'zh-CN', userAgent: 'node' }, configurable: true }) } catch {}
@@ -110,16 +117,89 @@ class FakePokemon {
   calculateStats() { this.stats = [100, this.base, this.base, this.base, this.base, this.base] }
   damageAndUpdate() {} // 引擎靠它认出 Pokemon 这个类
 }
+// 假 Phaser：道具图标要画进游戏的道具栏里，这里给个够用的
+globalThis.Phaser = {
+  Geom: {
+    Rectangle: class {
+      constructor(x, y, w, h) { this.x = x; this.y = y; this.width = w; this.height = h }
+      static Contains() { return true }
+    },
+  },
+  GameObjects: {
+    Text: class {
+      constructor(scene, x, y, str, style) {
+        this.scene = scene; this.x = x; this.y = y; this.text = String(str); this.style = style
+        // 中文一个字大概 6 个单位，英文字母 3 个（扩展里把字号缩了 1/6）
+        this.displayWidth = [...this.text].reduce((w, c) => w + (c.charCodeAt(0) > 255 ? 6 : 3), 0)
+        this.displayHeight = 6
+      }
+      setScale() { return this }
+      setShadow() { return this }
+      setPosition(x, y) { this.x = x; this.y = y; return this }
+    },
+    Graphics: class {
+      constructor(scene) { this.scene = scene; this.ops = [] }
+      fillStyle() { return this }
+      fillRoundedRect(...a) { this.ops.push(['fill', ...a]); return this }
+      lineStyle() { return this }
+      strokeRoundedRect(...a) { this.ops.push(['stroke', ...a]); return this }
+    },
+    Sprite: class {
+      constructor(scene, x, y, texture, frame) {
+        this.scene = scene; this.x = x; this.y = y; this.texture = texture; this.frame = { name: frame }
+        this.scale = 1; this.origin = 0
+      }
+      setOrigin(v) { this.origin = v; return this }
+      setFrame(f) { this.frame = { name: f }; return this }
+      setScale(v) { this.scale = v; return this }
+      setVisible(v) { this.visible = v; return this }
+    },
+    Container: class {
+      constructor(scene, x, y) {
+        this.scene = scene; this.x = x; this.y = y; this.list = []; this.scale = 1; this.depth = 0; this.name = ''
+        this.handlers = {}; this.visible = true
+      }
+      add(c) { this.list.push(c); return c }
+      removeAll() { this.list = []; return this }
+      setScale(v) { this.scale = v; return this }
+      setDepth(v) { this.depth = v; return this }
+      setName(v) { this.name = v; return this }
+      setVisible(v) { this.visible = v; return this }
+      setPosition(x, y) { this.x = x; this.y = y; return this }
+      setInteractive() { this.interactive = true; return this }
+      on(t, fn) { (this.handlers[t] = this.handlers[t] || []).push(fn); return this }
+      destroy() { this.scene = null; this.destroyed = true }
+    },
+  },
+}
 const party = []
 const messages = [] // 游戏里的消息条（api.battle.message）
 const gd = new GameData()
 const gacha = new EggGachaUiHandler()
+const tooltips = [] // 游戏的道具说明面板（右上角那个）
+const modBar = new Phaser.GameObjects.Container(null, 0, 0) // 游戏左上角那排道具图标
 const fakeScene = {
   gameData: gd,
-  ui: { handlers: [gacha], getHandler: () => null, mode: 0, setMode: noop },
+  ui: {
+    handlers: [gacha], getHandler: () => null, mode: 0, setMode: noop,
+    showTooltip: (title, content) => tooltips.push({ title, content }),
+    hideTooltip: () => { tooltips.length = 0 },
+    update: () => {},
+  },
   phaseManager: { currentPhase: new SelectModifierPhase(), startCurrentPhase: noop, shiftPhase: noop, getCurrentPhase: () => null, queueMessage: t => messages.push(t) },
   getPlayerParty: () => party,
   currentBattle: { waveIndex: 5 },
+  getModifierBar: () => modBar, // 游戏自己的道具栏（modifier-bar）
+}
+// 游戏画面上的东西
+fakeScene.children = [];
+fakeScene.children.getIndex = o => fakeScene.children.indexOf(o);
+fakeScene.add = {
+  container: (x, y) => {
+    const c = new Phaser.GameObjects.Container(fakeScene, x, y)
+    fakeScene.children.push(c)
+    return c
+  },
 }
 globalThis.PRS_SCENE = fakeScene
 const mkPokemon = (speciesId, extra = {}) => {
@@ -454,6 +534,39 @@ await gd.setPokemonCaught(mkPokemon(30, { mythical: true }), true, false)
 check('图鉴里早就有的，第一次也会给点', pts() === beforeOld + 95, 'points=' + pts())
 await gd.setPokemonCaught(mkPokemon(30, { mythical: true }), true, false)
 check('之后就再也不给了', pts() === beforeOld + 95, 'points=' + pts())
+
+// ---- 道具「训练家提升」 ----
+{
+  await sleep(300) // 扩展每个心跳画一次
+  const items = window.CoopMods.list().find(m => m.id === 'trainer-growth').items
+  check('mod 里有这个道具', items.indexOf('trainer-growth:boost') >= 0, JSON.stringify(items))
+  const bag = window.CoopMods.debug.bag()
+  check('道具在队伍背包里', bag['trainer-growth:boost'] && bag['trainer-growth:boost'].n === 1, JSON.stringify(bag))
+  // 图标：画在游戏左上角的道具栏里（跟在游戏自己的道具后面）
+  check('图标画在道具栏里', modBar.list.length === 1, 'n=' + modBar.list.length)
+  const icon = modBar.list[0]
+  check('图标是可点的', !!icon && icon.interactive === true, JSON.stringify(icon && icon.interactive))
+  check('图标用的是道具贴图', !!icon && icon.list[0] && icon.list[0].texture === 'items', icon && icon.list[0] ? icon.list[0].texture : 'no sprite')
+  check('图标在左上角', !!icon && icon.x >= 0 && icon.x < 320 && icon.y >= 0 && icon.y < 40, icon ? (icon.x + ',' + icon.y) : 'no icon')
+  // 说明面板：点一下图标，右上角出现说明，写着现在各项加了多少
+  const text = window.CoopMods.debug.tgItemInfo()
+  check('说明里有内容', typeof text === 'string' && text.length > 0, JSON.stringify(text))
+  check('说明写着扭蛋机的加成', text.indexOf('蛋的稀有度 Lv1：升档 +12%') >= 0, JSON.stringify(text))
+  check('说明写着局内运气', text.indexOf('运气 Lv1：+1') >= 0, JSON.stringify(text))
+  check('说明写着免费刷新', text.indexOf('免费刷新 Lv1：每场 ×1') >= 0, JSON.stringify(text))
+  check('说明写着奖励栏位', text.indexOf('奖励栏位 Lv1：+1 个') >= 0, JSON.stringify(text))
+  check('说明写着常驻攻击', text.indexOf('常驻攻击 Lv2') >= 0, JSON.stringify(text))
+  check('说明写着成长点', text.indexOf('成长点') >= 0, JSON.stringify(text))
+  check('说明里没有 0 级的成长线', text.indexOf('Lv0') < 0, JSON.stringify(text))
+  // 点一下图标 → 游戏的道具说明面板
+  icon.handlers.pointerover[0]()
+  check('点一下就打开说明面板', tooltips.length === 1, JSON.stringify(tooltips))
+  check('说明面板的标题是道具名', tooltips[0] && tooltips[0].title === '训练家提升', JSON.stringify(tooltips[0]))
+  check('说明面板里就是那些加成', tooltips[0] && tooltips[0].content === text, JSON.stringify(tooltips[0]))
+  // 移开 → 关掉
+  icon.handlers.pointerout[0]()
+  check('移开就关掉说明面板', tooltips.length === 0, JSON.stringify(tooltips))
+}
 
 console.log(failed ? '\n有 ' + failed + ' 项没过' : '\n全部通过')
 process.exit(failed ? 1 : 0)

@@ -11,6 +11,8 @@
 //      宝可梦自己的数值变大，换宝可梦也照样有（每只自己的都吃到）。
 //   4. 局外数据：每个 mod 一份，存 localStorage（关掉游戏、换存档都还在）。
 //   5. 成长线面板：mod 用 api.metaPanel() 描述它的成长线，这里负责画出来、扣点、升级。
+//   6. 道具「训练家提升」：图标画在游戏左上角的道具栏里（和游戏自己的道具排在一起），
+//      指上去/点一下，右上角出现游戏自己的道具说明面板，里面写着现在各项加了多少。
 //
 // 这个文件在 coop/host-mods.js 之后加载（main.mjs 的 modsJs()），用 window.CoopModsExt 注册，
 // 和上游的 engine/ext-*.js 是同一套机制（见 host-mods.js 里的 CoopModsExt）。
@@ -30,6 +32,7 @@
     X.addEvent('gachaEggMark');    // 这只蛋要不要加标记：{ id, tier, boosted, egg }，返回 true 就加
     X.addEvent('gachaPull');       // 扭蛋机要抽蛋了：{ count }（这一批几个蛋）
     X.addEvent('pokemonStatBonus'); // 常驻能力值加成：{ pokemon, bonus }，往 bonus 里写比例（0.1 = +10%）
+    X.addEvent('itemInfo');    // 道具说明面板里写什么：返回一段文字（mod 自己最清楚它的成长线）
 
     // ---- 局外数据：每个 mod 一份 ----
     const metas = {};
@@ -350,8 +353,99 @@
       }
     }
 
+    // ---- 道具「训练家提升」 ----
+    // 图标画在游戏左上角的道具栏里（就是游戏自己那排道具图标 modifier-bar 的后面），
+    // 画法、位置、点开的样子都和游戏自己的道具一样：指上去/点一下，右上角出现说明面板。
+    const ITEM_KEY = 'trainer-growth:boost';
+    const itemView = { scene: null, icon: null, sprite: null, tip: false };
+
+    // 道具说明面板里写什么：问一遍在跑的 mod（mod 自己最清楚每条成长线是什么）
+    function itemText() {
+      for (const [m, fn] of X.listeners('itemInfo')) {
+        const r = X.guard('itemInfo (' + (m && m.id) + ')', () => fn(), '');
+        if (typeof r === 'string' && r) return r;
+      }
+      return '';
+    }
+
+    // 说明面板固定在右上角：游戏默认是跟着鼠标走的（手机上自己在右上角），
+    // 这里两种都统一到右上角，点哪儿都是同一个位置。
+    function pinTip(s) {
+      const ui = s.ui;
+      if (!ui || ui.__tgTipPinned || typeof ui.update !== 'function') return;
+      ui.__tgTipPinned = true;
+      const orig = ui.update;
+      ui.update = function (...args) {
+        const r = orig.apply(this, args);
+        try {
+          if (itemView.tip && this.tooltipContainer && this.tooltipContainer.visible && this.tooltipBg) {
+            const cw = this.scene && this.scene.scaledCanvas ? this.scene.scaledCanvas.width : 320;
+            this.tooltipContainer.setPosition(cw - this.tooltipBg.width - 2, 2);
+          }
+        } catch (e) { log('说明面板挪位置出错：' + String((e && e.stack) || e).slice(0, 120)); }
+        return r;
+      };
+    }
+    function showItemInfo(s) {
+      const ui = s.ui;
+      if (!ui || typeof ui.showTooltip !== 'function') return;
+      const it = X.items[ITEM_KEY];
+      const text = itemText();
+      itemView.tip = true;
+      try { ui.showTooltip(it ? it.name : '训练家提升', text || '（还没有内容）'); } catch (e) { log('说明面板打不开：' + String((e && e.stack) || e).slice(0, 120)); }
+      pinTip(s);
+    }
+    function hideItemInfo(s) {
+      itemView.tip = false;
+      try { if (s.ui && typeof s.ui.hideTooltip === 'function') s.ui.hideTooltip(); } catch {}
+    }
+
+    function drawItem(s) {
+      if (!s || !s.add || !window.Phaser) return;
+      const it = X.items[ITEM_KEY];
+      const bar = typeof s.getModifierBar === 'function' ? s.getModifierBar() : null;
+      let party = [];
+      try { party = (s.getPlayerParty && s.getPlayerParty()) || []; } catch { party = []; }
+      // 只有这一局真的在跑、mod 也开着的时候才画
+      const on = !!it && X.isOn('trainer-growth') && X.active() && party.length > 0;
+      if (!bar || !on) {
+        if (itemView.icon) { try { itemView.icon.destroy(); } catch {} }
+        itemView.icon = null;
+        return;
+      }
+      // 游戏每次刷新道具栏都会把里面的图标全清掉重建，我们的也得跟着重建
+      if (!itemView.icon || !itemView.icon.scene || bar.list.indexOf(itemView.icon) < 0) {
+        const c = new Phaser.GameObjects.Container(s, 0, 0);
+        const sp = new Phaser.GameObjects.Sprite(s, 0, 12, 'items', X.frameOf(ITEM_KEY));
+        sp.setOrigin(0, 0.5);
+        sp.setScale(0.7); // 游戏自己的道具图标大多 22x22，我们的格子是 32x32，缩一点才一样大
+        c.add(sp);
+        c.setInteractive(new Phaser.Geom.Rectangle(0, 0, 32, 24), Phaser.Geom.Rectangle.Contains);
+        c.on('pointerover', () => showItemInfo(s));
+        c.on('pointerout', () => hideItemInfo(s));
+        bar.add(c);
+        itemView.icon = c;
+        itemView.sprite = sp;
+        itemView.scene = s;
+      }
+      // 图标是后来才进到游戏的道具贴图里的：贴图好了就把帧换上去
+      try {
+        const frame = X.frameOf(ITEM_KEY);
+        if (itemView.sprite && itemView.sprite.frame.name !== frame) itemView.sprite.setFrame(frame);
+      } catch {}
+      // 位置：跟在游戏自己的道具后面（游戏自己的排法：每行 12 个，间隔 26 像素）
+      const idx = bar.list.indexOf(itemView.icon);
+      const count = bar.list.length;
+      const rowIcons = 12 + 6 * Math.max(Math.ceil(Math.min(count, 24) / 12) - 2, 0);
+      itemView.icon.setPosition((idx % rowIcons) * 26 / (rowIcons / 12), Math.floor(idx / rowIcons) * 20);
+      itemView.icon.setVisible(true);
+      // 道具一直在队伍背包里：这样它就是一个真的道具（面板里能看到，也就不会被当成随机奖励发出去）
+      try { if (X.count(null, ITEM_KEY) < 1) X.give(null, ITEM_KEY, {}, 'mod'); } catch {}
+    }
+    X.debug('tgItemInfo', () => itemText()); // 给测试用：说明面板里现在写着什么
+
     X.onTick(s => {
-      try { hookGameData(s); findEgg(s); refreshParty(); } catch (e) { log('扩展出错：' + String((e && e.stack) || e).slice(0, 200)); }
+      try { hookGameData(s); findEgg(s); refreshParty(); drawItem(s); } catch (e) { log('扩展出错：' + String((e && e.stack) || e).slice(0, 200)); }
     });
   });
 })();
