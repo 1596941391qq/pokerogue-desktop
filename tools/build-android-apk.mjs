@@ -11,6 +11,7 @@
 import { execFileSync, spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import zlib from 'node:zlib'
 import { fileURLToPath } from 'node:url'
 import {
   ApkWriter, readCentralDirectory, readEntryRaw, computeContentDigest, buildV2Block,
@@ -107,6 +108,29 @@ function stageWeb() {
   }
   log('web 包就绪（含 ext-trainer-growth.js + mods-local.js）')
   return dst
+}
+
+// 我们锁定的游戏版本比上游安卓壳里的那个旧一点，壳里多出来的一些图片资源（属性图标之类）
+// 我们这边没有，会在图鉴面板里缺图。从壳里补过来（assets/ 下的哈希 js 不用补，
+// 那是我们自己 index.html 引用的一套，补了也是死文件）。
+function fillMissingAssets(shell, webDir) {
+  const cd = readCentralDirectory(shell)
+  let added = 0
+  for (const entry of cd.entries) {
+    if (!entry.name.startsWith(WEB_PREFIX)) continue
+    const rel = entry.name.slice(WEB_PREFIX.length)
+    if (rel.startsWith('assets/')) continue
+    const out = path.join(webDir, rel)
+    if (fs.existsSync(out)) continue
+    const { raw } = readEntryRaw(shell, entry)
+    fs.mkdirSync(path.dirname(out), { recursive: true })
+    // 壳里存着的多半是 deflate 过的，这里解回来
+    const data = entry.method === 0 ? raw : zlib.inflateRawSync(raw)
+    fs.writeFileSync(out, data)
+    added++
+  }
+  if (added) log('从上游壳补了 ' + added + ' 个我们这个游戏版本还没有的资源文件')
+  return added
 }
 
 // ---- 3. 重写 apk ----
@@ -221,6 +245,7 @@ function signAndAssemble(body, keyDir) {
 
 const shell = await fetchShell()
 const webDir = stageWeb()
+fillMissingAssets(shell, webDir)
 const body = rebuild(shell, webDir)
 const out = signAndAssemble(body, KEY_DIR)
 
